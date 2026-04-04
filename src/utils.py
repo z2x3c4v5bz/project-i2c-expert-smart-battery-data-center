@@ -5,16 +5,7 @@ from typing import Optional, List
 
 
 def safe_int(s: str, base: int = 10, default: int = 0) -> int:
-    """Parse int safely.
-
-    Args:
-        s: input string.
-        base: numeric base.
-        default: fallback value.
-
-    Returns:
-        Parsed integer or default.
-    """
+    """Parse int safely."""
     try:
         return int(s, base)
     except Exception:
@@ -37,11 +28,7 @@ def format_time_us_to_hhmmssus(us: int) -> str:
 
 
 def normalize_hex_token(tok: str) -> tuple[str, bool]:
-    """Normalize hex byte token and detect NACK marker (#).
-
-    Returns:
-        (hex_byte_upper, is_nack)
-    """
+    """Normalize hex byte token and detect NACK marker (#)."""
     tok = tok.strip()
     is_nack = tok.endswith('#')
     tok = tok.replace('#', '')
@@ -50,7 +37,6 @@ def normalize_hex_token(tok: str) -> tuple[str, bool]:
 
 @dataclass
 class ParsedRecord:
-    # Display fields
     time_us: Optional[int]
     rw: str
     device_address: str
@@ -59,8 +45,6 @@ class ParsedRecord:
     value_str: str
     unit: str
     data_raw: str
-
-    # Internal
     is_valid: bool
     is_nack: bool
     bytes_le: List[int]

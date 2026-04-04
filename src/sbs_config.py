@@ -67,14 +67,6 @@ class SbsConfigError(Exception):
 
 
 def canonical_command_code(cc: str) -> str:
-    """Normalize command code key to canonical format: '0xNN'.
-
-    Args:
-        cc: command code string such as '0x09', '09', '0X09'.
-
-    Returns:
-        Canonical command code string.
-    """
     cc = cc.strip()
     if cc.lower().startswith('0x'):
         cc = cc[2:]
@@ -83,7 +75,6 @@ def canonical_command_code(cc: str) -> str:
 
 
 def validate_config_schema(obj: Dict[str, Any]) -> None:
-    """Validate JSON schema quickly."""
     if not isinstance(obj, dict):
         raise SbsConfigError('Config root must be an object.')
     if 'Title' not in obj or 'Body' not in obj:

@@ -13,19 +13,10 @@ class ParseOptions:
     device_addr_width: int = 2
 
 
-# Accept delimiters like "----->" or "-----\\>" (backslash before >)
 _ARROW_RE = re.compile(r"-{5,}\s*(?:>|\\>)")
 
 
 def _split_time_and_payload(line: str) -> tuple[Optional[int], str, bool]:
-    """Split a log line by arrow delimiter.
-
-    The draft expects: <timestamp>us -----> <payload>
-    Real logs may contain spaces and sometimes '-----\\>' due to escaping.
-
-    Returns:
-        (time_us, payload, ok)
-    """
     m = _ARROW_RE.search(line)
     if not m:
         return None, line.strip(), False
@@ -68,7 +59,6 @@ def _parse_hex_tokens(segment: str) -> List[str]:
 
 
 def _bytes_from_tokens_reversed(tokens: List[str], start_idx: int) -> tuple[List[int], bool]:
-    """Build byte list in little-endian order from token list."""
     if len(tokens) <= start_idx:
         return [], False
 
@@ -126,7 +116,7 @@ def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRe
                     device = toks[0].upper()
                     cmd = toks[1].upper()
                     bytes_le, is_nack = _bytes_from_tokens_reversed(toks, 2)
-                    if not bytes_le:
+                    if len(bytes_le) < 2:
                         is_valid = False
 
             elif s_cnt == 2:
@@ -147,7 +137,7 @@ def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRe
                         device = toks1[0].upper()
                         cmd = toks1[1].upper()
                         bytes_le, is_nack = _bytes_from_tokens_reversed(toks2, 1)
-                        if not bytes_le:
+                        if len(bytes_le) < 2:
                             is_valid = False
             else:
                 is_valid = False

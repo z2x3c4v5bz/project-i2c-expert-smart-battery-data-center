@@ -17,7 +17,6 @@ class PlotSeries:
 
 
 def build_series(records: List[ParsedRecord], targets: Dict[str, Tuple[str, str]]) -> List[PlotSeries]:
-    """Build plot series for target functions."""
     series_map: Dict[str, PlotSeries] = {}
     for fn, (sname, unit) in targets.items():
         series_map[fn] = PlotSeries(name=sname, unit=unit, x=[], y=[])
@@ -33,7 +32,7 @@ def build_series(records: List[ParsedRecord], targets: Dict[str, Tuple[str, str]
                 y = float(r.value_str)
             except Exception:
                 continue
-            x = (r.time_us - t0) / 1_000_000.0  # seconds since start
+            x = (r.time_us - t0) / 1_000_000.0
             series_map[r.function].x.append(x)
             series_map[r.function].y.append(y)
 
