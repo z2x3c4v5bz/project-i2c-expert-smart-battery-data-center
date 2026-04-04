@@ -34,8 +34,8 @@ class BitFieldEditor(tk.Toplevel):
     """Edit BitField mapping in an isolated buffer.
 
     Important (English):
-      - Clicking OK only stores changes in memory (pending).
-      - Changes become effective only after "Apply Changes" in SBS Config Editor.
+      - OK stores changes as "pending" in ConfigEditor.
+      - Changes become effective only after "Apply Changes".
     """
 
     def __init__(self, master: tk.Misc, initial: Dict[str, str], cc: str):
@@ -149,11 +149,11 @@ class BitFieldEditor(tk.Toplevel):
 
 
 class ConfigEditor(tk.Toplevel):
-    """Modal SBS config editor window (v0.6).
+    """SBS Config Editor.
 
-    Notes (English):
-      - We do NOT set transient() for this editor, to keep Maximize button enabled.
-      - We still use grab_set() for modal behavior.
+    - No default maximize.
+    - Maximize button disabled (Windows only).
+    - Pending BitField guard on selection change and close.
     """
 
     def __init__(self, master: tk.Misc, cfg: SbsConfig):
@@ -162,6 +162,18 @@ class ConfigEditor(tk.Toplevel):
         self.geometry('1240x760')
         self.minsize(1140, 700)
         self.resizable(True, True)
+
+        # Disable maximize button (Windows only)
+        try:
+            import ctypes
+            GWL_STYLE = -16
+            WS_MAXIMIZEBOX = 0x00010000
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
+            style = style & (~WS_MAXIMIZEBOX)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+        except Exception:
+            pass
 
         self.cfg = cfg
 
@@ -292,6 +304,7 @@ class ConfigEditor(tk.Toplevel):
         self.tree.bind('<<TreeviewSelect>>', self._on_select)
         self._populate_tree()
 
+        # Modal behavior
         self.grab_set()
         self.focus_set()
 

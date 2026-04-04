@@ -58,29 +58,22 @@ def _parse_hex_tokens(segment: str) -> List[str]:
     return [t for t in segment.split() if t]
 
 
-def _bytes_from_tokens_reordered(tokens_low_to_high: List[str], start_idx: int) -> tuple[List[int], bool]:
-    """Reorder data bytes before decoding.
-
-    Input log is low-byte -> high-byte.
-    Requirement: reverse the order first.
+def _bytes_from_tokens_low_to_high(tokens: List[str], start_idx: int) -> tuple[List[int], bool]:
+    """Parse bytes in the original log order (low-byte -> high-byte).
 
     Example:
-      - Read: 01 E9#  => reordered: E9 01
-      - Write: 01 02 03 E9# => reordered: E9 03 02 01
-
-    We store bytes in the *reordered* sequence, and treat it as "new low -> new high".
-    That means bytes_le[0] is the first byte after reversing.
+      payload bytes: 96 2F#  => bytes_le = [0x96, 0x2F]
 
     English note:
-      This intentionally swaps byte significance as requested.
+      SMBus/Smart Battery word data is typically little-endian (low byte first),
+      so we keep this order for isValue decoding.
     """
-    if len(tokens_low_to_high) <= start_idx:
+    if len(tokens) <= start_idx:
         return [], False
 
     is_nack = False
     out: List[int] = []
-    # reverse the payload bytes
-    for tok in reversed(tokens_low_to_high[start_idx:]):
+    for tok in tokens[start_idx:]:
         h, nack = normalize_hex_token(tok)
         is_nack = is_nack or nack
         try:
@@ -91,12 +84,14 @@ def _bytes_from_tokens_reordered(tokens_low_to_high: List[str], start_idx: int) 
 
 
 def _decode_value(bytes_le: List[int], is_value: bool) -> str:
-    """Decode using reordered bytes.
+    """Decode bytes.
 
-    If is_value is True, treat bytes_le[0] as the lowest byte in the NEW order.
+    - is_value=True: little-endian decoding (low->high) to decimal.
+    - is_value=False: show binary strings for each byte.
     """
     if not bytes_le:
         return ''
+
     if is_value:
         val = 0
         for i, b in enumerate(bytes_le):
@@ -135,7 +130,7 @@ def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRe
                 else:
                     device = toks[0].upper()
                     cmd = toks[1].upper()
-                    bytes_le, is_nack = _bytes_from_tokens_reordered(toks, 2)
+                    bytes_le, is_nack = _bytes_from_tokens_low_to_high(toks, 2)
                     if len(bytes_le) < 1:
                         is_valid = False
 
@@ -156,7 +151,7 @@ def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRe
                     else:
                         device = toks1[0].upper()
                         cmd = toks1[1].upper()
-                        bytes_le, is_nack = _bytes_from_tokens_reordered(toks2, 1)
+                        bytes_le, is_nack = _bytes_from_tokens_low_to_high(toks2, 1)
                         if len(bytes_le) < 1:
                             is_valid = False
             else:

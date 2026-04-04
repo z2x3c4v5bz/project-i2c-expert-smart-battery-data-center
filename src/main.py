@@ -15,7 +15,7 @@ from .config_editor import ConfigEditor
 from .plotter import build_series, render_plot
 from .updater import check_update
 
-APP_VERSION = '0.6.0-draft'
+APP_VERSION = '0.7.0-draft'
 UPDATE_JSON_URL = ''
 
 
@@ -42,13 +42,12 @@ class ProgressDialog(tk.Toplevel):
 
 
 class SearchDialog(tk.Toplevel):
-    """Reusable search dialog with Find Previous / Find Next buttons.
+    """Search dialog with Find Previous / Find Next.
 
-    Behavior (English):
-    - Uses current selection as anchor.
-    - If nothing is selected, anchors to the first visible record.
-    - Wrap-around search within the current filtered view.
-    - If no match after a full loop, notify the user.
+    English note:
+      - Uses current selection as anchor.
+      - If nothing is selected, anchors to the first visible record.
+      - Wrap-around search within current filtered view.
     """
 
     def __init__(self, master: 'App', field: str, title: str, prompt: str, initial: str = ''):
@@ -57,7 +56,7 @@ class SearchDialog(tk.Toplevel):
         self.field = field
 
         self.title(title)
-        self.geometry('520x160')
+        self.geometry('420x150')
         self.resizable(False, False)
 
         frm = ttk.Frame(self)
@@ -65,16 +64,12 @@ class SearchDialog(tk.Toplevel):
 
         ttk.Label(frm, text=prompt).grid(row=0, column=0, sticky='w')
         self.var = tk.StringVar(value=initial)
-        ent = ttk.Entry(frm, textvariable=self.var, width=42)
+        ent = ttk.Entry(frm, textvariable=self.var, width=34)
         ent.grid(row=1, column=0, columnspan=3, sticky='ew', pady=(6, 8))
 
-        btn_prev = ttk.Button(frm, text='Find Previous', command=lambda: self._do_find(-1))
-        btn_next = ttk.Button(frm, text='Find Next', command=lambda: self._do_find(+1))
-        btn_close = ttk.Button(frm, text='Close', command=self.destroy)
-
-        btn_prev.grid(row=2, column=0, sticky='w', padx=(0, 8))
-        btn_next.grid(row=2, column=1, sticky='w')
-        btn_close.grid(row=2, column=2, sticky='e')
+        ttk.Button(frm, text='Find Previous', command=lambda: self._do_find(-1)).grid(row=2, column=0, sticky='w', padx=(0, 8))
+        ttk.Button(frm, text='Find Next', command=lambda: self._do_find(+1)).grid(row=2, column=1, sticky='w')
+        ttk.Button(frm, text='Close', command=self.destroy).grid(row=2, column=2, sticky='e')
 
         frm.columnconfigure(1, weight=1)
 
@@ -127,6 +122,7 @@ class App(tk.Tk):
         file_menu.add_command(label='New SBS Config', command=self.on_new_config)
         file_menu.add_command(label='Load SBS Config', command=self.on_load_config)
         file_menu.add_command(label='Load Log', command=self.on_load_log)
+        file_menu.add_command(label='Save Photo...', command=self.on_save_photo)
         file_menu.add_separator()
         file_menu.add_command(label='Exit', command=self.destroy)
         menubar.add_cascade(label='File', menu=file_menu)
@@ -242,6 +238,7 @@ class App(tk.Tk):
 
         self.tree.bind('<<TreeviewSelect>>', self.on_select_record)
 
+        # Bit Field
         self.bf_frame = ttk.LabelFrame(self.bottom, text='Bit Field')
         self.bottom.add(self.bf_frame, weight=1)
 
@@ -261,6 +258,7 @@ class App(tk.Tk):
         self.bf_canvas.create_window((0, 0), window=self.bit_container, anchor='nw')
         self.bit_container.bind('<Configure>', lambda e: self.bf_canvas.configure(scrollregion=self.bf_canvas.bbox('all')))
 
+        # Plot
         self.plot_frame = ttk.LabelFrame(self.bottom, text='Plot')
         self.bottom.add(self.plot_frame, weight=2)
 
@@ -274,6 +272,13 @@ class App(tk.Tk):
         }
         for k, var in self.plot_vars.items():
             ttk.Checkbutton(controls, text=k, variable=var, command=self.refresh_plot).pack(side='left', padx=6)
+
+        ttk.Label(controls, text='Plot Range (s):').pack(side='left', padx=(14, 4))
+        self.plot_xmin_var = tk.StringVar(value='')
+        self.plot_xmax_var = tk.StringVar(value='')
+        ttk.Entry(controls, textvariable=self.plot_xmin_var, width=8).pack(side='left')
+        ttk.Label(controls, text='~').pack(side='left', padx=4)
+        ttk.Entry(controls, textvariable=self.plot_xmax_var, width=8).pack(side='left')
 
         ttk.Button(controls, text='Refresh Plot', command=self.refresh_plot).pack(side='right')
 
@@ -289,11 +294,14 @@ class App(tk.Tk):
     def _set_menu_state(self):
         if self.cfg is None:
             self.file_menu.entryconfig('Load Log', state='disabled')
+            self.file_menu.entryconfig('Save Photo...', state='disabled')
             self.edit_menu.entryconfig('Modify SBS Config', state='disabled')
         else:
             self.file_menu.entryconfig('Load Log', state='normal')
+            self.file_menu.entryconfig('Save Photo...', state='normal')
             self.edit_menu.entryconfig('Modify SBS Config', state='normal')
 
+    # ---------- Actions ----------
     def on_new_config(self):
         try:
             from pathlib import Path
@@ -337,6 +345,20 @@ class App(tk.Tk):
         self.log_name_var.set(path.split('/')[-1])
         self._parse_current_log(show_message=True)
 
+    def on_save_photo(self):
+        """Save current plot as an image file."""
+        if self.fig is None:
+            messagebox.showwarning('Save Photo', 'No plot available.', parent=self)
+            return
+        path = filedialog.asksaveasfilename(parent=self, title='Save Photo', defaultextension='.png', filetypes=[('PNG', '*.png'), ('JPEG', '*.jpg;*.jpeg'), ('All', '*.*')])
+        if not path:
+            return
+        try:
+            self.fig.savefig(path, dpi=200, bbox_inches='tight')
+            messagebox.showinfo('Save Photo', f'Saved: {path}', parent=self)
+        except Exception as e:
+            messagebox.showerror('Save Photo', str(e), parent=self)
+
     def on_refresh_table(self):
         if self.log_path is None:
             messagebox.showwarning('Refresh', 'No log file loaded.', parent=self)
@@ -359,6 +381,7 @@ class App(tk.Tk):
             except Exception:
                 pass
 
+    # ---------- Filters ----------
     def on_apply_filters(self):
         dev = self.dev_entry.get().strip()
         cmd = self.cmd_entry.get().strip()
@@ -386,6 +409,7 @@ class App(tk.Tk):
         self.cmd_entry.delete(0, 'end')
         self.apply_filters_and_refresh()
 
+    # ---------- Parsing ----------
     def _parse_current_log(self, show_message: bool):
         if self.log_path is None or self.cfg is None:
             return
@@ -450,6 +474,7 @@ class App(tk.Tk):
         self.filter_summary_var.set(', '.join(parts) if parts else '(none)')
         self.count_var.set(f"{visible}/{total}")
 
+    # ---------- Table ----------
     def refresh_table(self):
         for i in self.tree.get_children():
             self.tree.delete(i)
@@ -493,6 +518,7 @@ class App(tk.Tk):
         idx = self.visible_indices[view_row]
         self._render_bitfield(self.records[idx])
 
+    # ---------- Bit Field ----------
     def _render_bitfield(self, rec: Optional[ParsedRecord]):
         for w in self.bit_container.winfo_children():
             w.destroy()
@@ -517,25 +543,23 @@ class App(tk.Tk):
             ttk.Label(self.bit_container, text='(No bit-field definition)').pack(anchor='w')
             return
 
-        # bytes_le: reordered bytes (new low -> new high). For high-byte-first display:
-        # element position p -> byte_index = (n-1-p)
         CELL_W = 14
         n = len(rec.bytes_le)
         if n <= 0:
             ttk.Label(self.bit_container, text='(No byte data)').pack(anchor='w')
             return
 
-        for p in range(n):
-            byte_index = n - 1 - p
-            b = rec.bytes_le[p]
-
-            frame = ttk.LabelFrame(self.bit_container, text=f'Byte {byte_index}')
+        # Display high byte first
+        for bi in range(n - 1, -1, -1):
+            b = rec.bytes_le[bi]
+            frame = ttk.LabelFrame(self.bit_container, text=f'Byte {bi}')
             frame.pack(fill='x', pady=6)
+
             for col in range(8):
                 frame.columnconfigure(col, weight=0)
 
             for col, bit in enumerate(range(7, -1, -1)):
-                idx = byte_index * 8 + bit
+                idx = bi * 8 + bit
                 title = d.bitfield.get(str(idx), f'bit{idx}')
                 ttk.Label(frame, text=title, width=CELL_W, anchor='center', borderwidth=1, relief='solid').grid(row=0, column=col, sticky='nsew', padx=1, pady=1)
 
@@ -548,27 +572,22 @@ class App(tk.Tk):
         if not self.records or not self.visible_indices:
             return
 
-        # If no current selection, default to first row
+        # Default selection to first row if none
         if not self.tree.selection() and self.visible_indices:
             self.tree.selection_set('0')
             self.tree.see('0')
             self.on_select_record()
 
         titles = {'cmd': 'Search Command Code', 'raw': 'Search Raw Data', 'rw': 'Search RW'}
-        prompts = {
-            'cmd': 'Enter Command Code (hex, e.g., 2D or 0x2D):',
-            'raw': 'Enter Raw Data keyword (case-insensitive):',
-            'rw': 'Enter RW (R or W):'
-        }
+        prompts = {'cmd': 'Enter Command Code (hex, e.g., 2D or 0x2D):', 'raw': 'Enter Raw Data keyword:', 'rw': 'Enter RW (R or W):'}
         initial = self._last_search.get(field, '')
 
+        # Single window per field
         if field in self._search_windows:
+            win = self._search_windows[field]
             try:
-                win = self._search_windows[field]
                 if win.winfo_exists():
-                    win.deiconify()
-                    win.lift()
-                    return
+                    win.deiconify(); win.lift(); return
             except Exception:
                 pass
 
@@ -659,6 +678,7 @@ class App(tk.Tk):
         self.tree.see(iid)
         self.on_select_record()
 
+    # ---------- Plot ----------
     def refresh_plot(self):
         if not self.records:
             render_plot(self.fig, [])
@@ -673,7 +693,18 @@ class App(tk.Tk):
         if self.plot_vars['RelativeStateOfCharge()'].get():
             targets['RelativeStateOfCharge()'] = ('RSOC', '%')
 
-        series = build_series(self.records, targets)
+        x_range = None
+        try:
+            xmin_txt = self.plot_xmin_var.get().strip()
+            xmax_txt = self.plot_xmax_var.get().strip()
+            if xmin_txt != '' or xmax_txt != '':
+                xmin = float(xmin_txt) if xmin_txt != '' else float('-inf')
+                xmax = float(xmax_txt) if xmax_txt != '' else float('inf')
+                x_range = (xmin, xmax)
+        except Exception:
+            x_range = None
+
+        series = build_series(self.records, targets, x_range=x_range)
         render_plot(self.fig, series)
         self.canvas.draw()
 

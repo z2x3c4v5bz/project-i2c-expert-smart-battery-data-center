@@ -1,23 +1,21 @@
-# I2C Expert Smart Battery Data Center (v0.6 draft)
+# I2C Expert Smart Battery Data Center (v0.7 draft)
 
 ## Highlights
-- Search menu simplified: Search Command/Raw/RW opens one dialog with Find Previous/Next buttons
-- Search dialog uses current selection as anchor; defaults to first record if none selected
-- Wrap-around search; stop with message if no match after one full loop
-- Main table: Index column (global index, not affected by filters)
-- Go to Index (exact定位)
-- Byte order handling:
-  - Log data tokens are low->high; we reverse to high->low for *new low->new high* mapping
-  - isValue conversion uses reordered bytes before hex->decimal
-- Bit Field display mapping fixed: high byte shown on top and bit indices align
-- SBS Config Editor:
-  - No default maximize on open
-  - Maximize button enabled (do NOT set transient on editor)
-  - BitField edits are pending after OK; must Apply Changes then Save/Save As
-  - If pending BitField exists, switching Command or closing prompts Discard/Cancel
+- **isValue decoding fixed**: decode uses low->high (little-endian) byte order before converting to decimal.
+- Plot legend moved **outside to the right** to avoid covering the chart.
+- Plot time range filter (seconds) added.
+- File menu: **Save Photo...** to export current plot.
+- Search menu simplified: Search Command/Raw/RW opens a dialog with **Find Previous/Find Next** buttons.
+- Search dialog smaller width; no Cancel button.
+- SBS Config Editor: no auto-maximize; maximize button disabled (Windows only).
+- BitField edit: OK stores pending changes; switching command/closing prompts discard/cancel.
 
 ## Run
 ```bash
 pip install -r requirements.txt
 python -m src.main
 ```
+
+## Test
+- Load config: assets/default_sbs_config.json
+- Load log: assets/sample_log_snippet.txt

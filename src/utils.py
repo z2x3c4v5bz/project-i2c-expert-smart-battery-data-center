@@ -47,4 +47,4 @@ class ParsedRecord:
     data_raw: str
     is_valid: bool
     is_nack: bool
-    bytes_le: List[int]
+    bytes_le: List[int]  # low->high order
