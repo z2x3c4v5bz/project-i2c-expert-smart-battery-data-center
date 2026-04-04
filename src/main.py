@@ -15,7 +15,7 @@ from .config_editor import ConfigEditor
 from .plotter import build_series, render_plot
 from .updater import check_update
 
-APP_VERSION = '0.5.0-draft'
+APP_VERSION = '0.6.0-draft'
 UPDATE_JSON_URL = ''
 
 
@@ -41,6 +41,55 @@ class ProgressDialog(tk.Toplevel):
         self.destroy()
 
 
+class SearchDialog(tk.Toplevel):
+    """Reusable search dialog with Find Previous / Find Next buttons.
+
+    Behavior (English):
+    - Uses current selection as anchor.
+    - If nothing is selected, anchors to the first visible record.
+    - Wrap-around search within the current filtered view.
+    - If no match after a full loop, notify the user.
+    """
+
+    def __init__(self, master: 'App', field: str, title: str, prompt: str, initial: str = ''):
+        super().__init__(master)
+        self.app = master
+        self.field = field
+
+        self.title(title)
+        self.geometry('520x160')
+        self.resizable(False, False)
+
+        frm = ttk.Frame(self)
+        frm.pack(fill='both', expand=True, padx=12, pady=12)
+
+        ttk.Label(frm, text=prompt).grid(row=0, column=0, sticky='w')
+        self.var = tk.StringVar(value=initial)
+        ent = ttk.Entry(frm, textvariable=self.var, width=42)
+        ent.grid(row=1, column=0, columnspan=3, sticky='ew', pady=(6, 8))
+
+        btn_prev = ttk.Button(frm, text='Find Previous', command=lambda: self._do_find(-1))
+        btn_next = ttk.Button(frm, text='Find Next', command=lambda: self._do_find(+1))
+        btn_close = ttk.Button(frm, text='Close', command=self.destroy)
+
+        btn_prev.grid(row=2, column=0, sticky='w', padx=(0, 8))
+        btn_next.grid(row=2, column=1, sticky='w')
+        btn_close.grid(row=2, column=2, sticky='e')
+
+        frm.columnconfigure(1, weight=1)
+
+        self.transient(master)
+        self.grab_set()
+        ent.focus_set()
+
+    def _do_find(self, direction: int):
+        q = self.var.get().strip()
+        if not q:
+            return
+        self.app._last_search[self.field] = q
+        self.app.find_in_view(self.field, q, direction)
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -57,17 +106,15 @@ class App(tk.Tk):
         self.log_path: Optional[str] = None
         self.records: List[ParsedRecord] = []
 
-        # Filters
         self.filter_device: Optional[str] = None
         self.filter_cmd: Optional[str] = None
         self.hide_invalid: bool = False
         self.visible_indices: List[int] = []
 
-        # View
         self.show_plot_var = tk.BooleanVar(value=True)
 
-        # Search state
         self._last_search: Dict[str, str] = {}
+        self._search_windows: Dict[str, SearchDialog] = {}
 
         self._build_menu()
         self._build_layout()
@@ -90,14 +137,9 @@ class App(tk.Tk):
         edit_menu.add_separator()
 
         search_menu = tk.Menu(edit_menu, tearoff=0)
-        search_menu.add_command(label='Find Next: Command Code...', command=lambda: self.on_find('cmd', +1))
-        search_menu.add_command(label='Find Previous: Command Code...', command=lambda: self.on_find('cmd', -1))
-        search_menu.add_separator()
-        search_menu.add_command(label='Find Next: Raw Data...', command=lambda: self.on_find('raw', +1))
-        search_menu.add_command(label='Find Previous: Raw Data...', command=lambda: self.on_find('raw', -1))
-        search_menu.add_separator()
-        search_menu.add_command(label='Find Next: RW...', command=lambda: self.on_find('rw', +1))
-        search_menu.add_command(label='Find Previous: RW...', command=lambda: self.on_find('rw', -1))
+        search_menu.add_command(label='Search Command Code...', command=lambda: self.open_search_dialog('cmd'))
+        search_menu.add_command(label='Search Raw Data...', command=lambda: self.open_search_dialog('raw'))
+        search_menu.add_command(label='Search RW...', command=lambda: self.open_search_dialog('rw'))
         search_menu.add_separator()
         search_menu.add_command(label='Go to Index...', command=self.on_goto_index)
         edit_menu.add_cascade(label='Search', menu=search_menu)
@@ -252,7 +294,6 @@ class App(tk.Tk):
             self.file_menu.entryconfig('Load Log', state='normal')
             self.edit_menu.entryconfig('Modify SBS Config', state='normal')
 
-    # ---------- Actions ----------
     def on_new_config(self):
         try:
             from pathlib import Path
@@ -318,7 +359,6 @@ class App(tk.Tk):
             except Exception:
                 pass
 
-    # ---------- Filters ----------
     def on_apply_filters(self):
         dev = self.dev_entry.get().strip()
         cmd = self.cmd_entry.get().strip()
@@ -346,7 +386,6 @@ class App(tk.Tk):
         self.cmd_entry.delete(0, 'end')
         self.apply_filters_and_refresh()
 
-    # ---------- Parsing ----------
     def _parse_current_log(self, show_message: bool):
         if self.log_path is None or self.cfg is None:
             return
@@ -411,7 +450,6 @@ class App(tk.Tk):
         self.filter_summary_var.set(', '.join(parts) if parts else '(none)')
         self.count_var.set(f"{visible}/{total}")
 
-    # ---------- Table ----------
     def refresh_table(self):
         for i in self.tree.get_children():
             self.tree.delete(i)
@@ -455,7 +493,6 @@ class App(tk.Tk):
         idx = self.visible_indices[view_row]
         self._render_bitfield(self.records[idx])
 
-    # ---------- Bit Field (High byte on top) ----------
     def _render_bitfield(self, rec: Optional[ParsedRecord]):
         for w in self.bit_container.winfo_children():
             w.destroy()
@@ -480,22 +517,25 @@ class App(tk.Tk):
             ttk.Label(self.bit_container, text='(No bit-field definition)').pack(anchor='w')
             return
 
+        # bytes_le: reordered bytes (new low -> new high). For high-byte-first display:
+        # element position p -> byte_index = (n-1-p)
         CELL_W = 14
         n = len(rec.bytes_le)
         if n <= 0:
             ttk.Label(self.bit_container, text='(No byte data)').pack(anchor='w')
             return
 
-        for bi in range(n - 1, -1, -1):
-            frame = ttk.LabelFrame(self.bit_container, text=f'Byte {bi}')
+        for p in range(n):
+            byte_index = n - 1 - p
+            b = rec.bytes_le[p]
+
+            frame = ttk.LabelFrame(self.bit_container, text=f'Byte {byte_index}')
             frame.pack(fill='x', pady=6)
             for col in range(8):
                 frame.columnconfigure(col, weight=0)
 
-            b = rec.bytes_le[bi]
-
             for col, bit in enumerate(range(7, -1, -1)):
-                idx = bi * 8 + bit
+                idx = byte_index * 8 + bit
                 title = d.bitfield.get(str(idx), f'bit{idx}')
                 ttk.Label(frame, text=title, width=CELL_W, anchor='center', borderwidth=1, relief='solid').grid(row=0, column=col, sticky='nsew', padx=1, pady=1)
 
@@ -504,6 +544,37 @@ class App(tk.Tk):
                 ttk.Label(frame, text=str(val), width=CELL_W, anchor='center', borderwidth=1, relief='solid').grid(row=1, column=col, sticky='nsew', padx=1, pady=1)
 
     # ---------- Search ----------
+    def open_search_dialog(self, field: str):
+        if not self.records or not self.visible_indices:
+            return
+
+        # If no current selection, default to first row
+        if not self.tree.selection() and self.visible_indices:
+            self.tree.selection_set('0')
+            self.tree.see('0')
+            self.on_select_record()
+
+        titles = {'cmd': 'Search Command Code', 'raw': 'Search Raw Data', 'rw': 'Search RW'}
+        prompts = {
+            'cmd': 'Enter Command Code (hex, e.g., 2D or 0x2D):',
+            'raw': 'Enter Raw Data keyword (case-insensitive):',
+            'rw': 'Enter RW (R or W):'
+        }
+        initial = self._last_search.get(field, '')
+
+        if field in self._search_windows:
+            try:
+                win = self._search_windows[field]
+                if win.winfo_exists():
+                    win.deiconify()
+                    win.lift()
+                    return
+            except Exception:
+                pass
+
+        win = SearchDialog(self, field, titles[field], prompts[field], initial)
+        self._search_windows[field] = win
+
     def _current_view_row(self) -> int:
         sel = self.tree.selection()
         if not sel:
@@ -516,6 +587,7 @@ class App(tk.Tk):
     def _match_record(self, idx: int, field: str, query: str) -> bool:
         r = self.records[idx]
         q = query.strip()
+
         if field == 'cmd':
             if not r.is_valid:
                 return False
@@ -534,28 +606,21 @@ class App(tk.Tk):
 
         return q.lower() in (r.data_raw or '').lower()
 
-    def on_find(self, field: str, direction: int):
+    def find_in_view(self, field: str, query: str, direction: int):
         if not self.records or not self.visible_indices:
             return
 
-        title_map = {'cmd': 'Command Code', 'raw': 'Raw Data', 'rw': 'RW'}
-        prompt_map = {'cmd': 'Enter hex (e.g., 2D or 0x2D):', 'raw': 'Enter keyword (case-insensitive):', 'rw': 'Enter R or W:'}
-
-        last = self._last_search.get(field, '')
-        q = tk.simpledialog.askstring(f'Find {"Next" if direction>0 else "Previous"}: {title_map[field]}', prompt_map[field], initialvalue=last, parent=self)
-        if not q:
-            return
-        self._last_search[field] = q
-
         n = len(self.visible_indices)
         cur = self._current_view_row()
-        start = (cur + direction) % n if cur >= 0 else 0
+        if cur < 0:
+            cur = 0
 
+        start = (cur + direction) % n
         steps = 0
         pos = start
         while steps < n:
             rec_idx = self.visible_indices[pos]
-            if self._match_record(rec_idx, field, q):
+            if self._match_record(rec_idx, field, query):
                 iid = str(pos)
                 self.tree.selection_set(iid)
                 self.tree.see(iid)
@@ -564,7 +629,7 @@ class App(tk.Tk):
             pos = (pos + direction) % n
             steps += 1
 
-        messagebox.showinfo('Find', 'No match found after searching all records (within current filters).', parent=self)
+        messagebox.showinfo('Search', 'No match found after searching all records (within current filters).', parent=self)
 
     def on_goto_index(self):
         if not self.records:
@@ -594,7 +659,6 @@ class App(tk.Tk):
         self.tree.see(iid)
         self.on_select_record()
 
-    # ---------- Plot ----------
     def refresh_plot(self):
         if not self.records:
             render_plot(self.fig, [])
@@ -613,7 +677,6 @@ class App(tk.Tk):
         render_plot(self.fig, series)
         self.canvas.draw()
 
-    # ---------- Help ----------
     def on_about(self):
         messagebox.showinfo('About', f'I2C Expert Smart Battery Data Center\nVersion: {APP_VERSION}\nUI: tkinter\nPlot: matplotlib')
 
