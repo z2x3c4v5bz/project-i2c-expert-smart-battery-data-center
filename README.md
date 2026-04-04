@@ -1,22 +1,14 @@
-# I2C Expert Smart Battery Data Center
+# I2C Expert Smart Battery Data Center (v0.2 draft)
 
-> A desktop tool to parse I2C Expert log (.txt) and decode SMBus/Smart Battery commands via a JSON SBS configuration.
-
-## Features
-- Load/Edit SBS config (JSON)
-- Load I2C Expert log (.txt) and parse Read/Write transactions
-- Show decoded Function/Value/Unit and raw bytes
-- Bit-field view (when IsValue = false)
-- Plot Voltage/Current/RSOC vs time
-- Manual update check (GitHub) — **disabled by default** (set URL in settings)
+## What's new in v0.2
+- Main window layout: top = data table, bottom-left = bit field, bottom-right = plot
+- Config editor: can jump to a specific Command Code (Go), and edit BitField via Add/Delete UI
+- Config keys normalized to canonical format: 0xNN
+- Log parser: more tolerant for delimiters like '----->' or '-----\>'
 
 ## Run
 ```bash
+pip install -r requirements.txt
 python -m src.main
 ```
-
-## Notes
-- Python 3.x
-- UI: tkinter
-- Plot: matplotlib
 

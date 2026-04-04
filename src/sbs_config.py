@@ -66,12 +66,24 @@ class SbsConfigError(Exception):
     pass
 
 
-def validate_config_schema(obj: Dict[str, Any]) -> None:
-    """Validate JSON schema quickly.
+def canonical_command_code(cc: str) -> str:
+    """Normalize command code key to canonical format: '0xNN'.
 
-    Raises:
-        SbsConfigError: if schema is invalid.
+    Args:
+        cc: command code string such as '0x09', '09', '0X09'.
+
+    Returns:
+        Canonical command code string.
     """
+    cc = cc.strip()
+    if cc.lower().startswith('0x'):
+        cc = cc[2:]
+    val = int(cc, 16)
+    return f"0x{val:02X}"
+
+
+def validate_config_schema(obj: Dict[str, Any]) -> None:
+    """Validate JSON schema quickly."""
     if not isinstance(obj, dict):
         raise SbsConfigError('Config root must be an object.')
     if 'Title' not in obj or 'Body' not in obj:
@@ -82,7 +94,7 @@ def validate_config_schema(obj: Dict[str, Any]) -> None:
         raise SbsConfigError('Body must be an object.')
 
     for cc, d in obj['Body'].items():
-        if not isinstance(cc, str) or not cc.startswith('0x'):
+        if not isinstance(cc, str):
             raise SbsConfigError(f'Invalid command code key: {cc}')
         if not isinstance(d, dict):
             raise SbsConfigError(f'Command definition must be object: {cc}')
@@ -99,20 +111,26 @@ def load_config(path: str | Path) -> SbsConfig:
     validate_config_schema(obj)
 
     body: Dict[str, SbsCommandDef] = {}
-    for cc, d in obj['Body'].items():
+    for cc_raw, d in obj['Body'].items():
+        try:
+            cc = canonical_command_code(cc_raw)
+        except Exception:
+            raise SbsConfigError(f'Invalid command code key: {cc_raw}')
+
         ft = int(d['FunctionType'])
         fn = str(d['Function'])
-        # If FunctionType is not 0, force function string from enumeration
         if ft != 0:
             fn = FUNCTION_TYPE.get(ft, fn)
 
-        body[cc.upper()] = SbsCommandDef(
+        bitfield = dict(d['BitField']) if isinstance(d['BitField'], dict) else {}
+
+        body[cc] = SbsCommandDef(
             function=fn,
             function_type=ft,
             access=int(d['Access']),
             is_value=bool(d['IsValue']),
             unit=str(d['Unit']),
-            bitfield=dict(d['BitField']) if isinstance(d['BitField'], dict) else {},
+            bitfield=bitfield,
         )
 
     return SbsConfig(title=obj['Title'], body=body, path=p)
@@ -121,7 +139,9 @@ def load_config(path: str | Path) -> SbsConfig:
 def save_config(cfg: SbsConfig, path: str | Path) -> None:
     p = Path(path)
     obj = {'Title': cfg.title, 'Body': {}}
-    for cc, d in cfg.body.items():
+
+    for cc in sorted(cfg.body.keys(), key=lambda x: int(x[2:], 16)):
+        d = cfg.body[cc]
         obj['Body'][cc] = {
             'Function': d.function,
             'FunctionType': int(d.function_type),
@@ -130,5 +150,6 @@ def save_config(cfg: SbsConfig, path: str | Path) -> None:
             'Unit': d.unit,
             'BitField': d.bitfield,
         }
+
     with p.open('w', encoding='utf-8') as f:
         json.dump(obj, f, indent=2)

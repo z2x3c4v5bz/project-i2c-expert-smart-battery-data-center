@@ -15,17 +15,7 @@ class UpdateResult:
 
 
 def check_update(version_url: str, current_version: str, timeout_s: int = 5) -> UpdateResult:
-    """Check update from a GitHub raw URL (or any HTTPS URL).
-
-    Expected JSON format:
-    {
-      "latest": "1.2.3",
-      "notes": "...",
-      "url": "https://..."
-    }
-
-    This function is intentionally simple to comply with 'no internet access except update check'.
-    """
+    """Check update from a GitHub raw URL (or any HTTPS URL)."""
     if not version_url:
         return UpdateResult(False, 'Update URL is not configured.', None, current_version)
 

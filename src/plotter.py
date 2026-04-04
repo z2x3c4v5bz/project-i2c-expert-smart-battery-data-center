@@ -17,15 +17,7 @@ class PlotSeries:
 
 
 def build_series(records: List[ParsedRecord], targets: Dict[str, Tuple[str, str]]) -> List[PlotSeries]:
-    """Build plot series for target functions.
-
-    Args:
-        records: parsed records.
-        targets: mapping function_name -> (series_name, unit)
-
-    Returns:
-        List of series.
-    """
+    """Build plot series for target functions."""
     series_map: Dict[str, PlotSeries] = {}
     for fn, (sname, unit) in targets.items():
         series_map[fn] = PlotSeries(name=sname, unit=unit, x=[], y=[])
@@ -49,7 +41,6 @@ def build_series(records: List[ParsedRecord], targets: Dict[str, Tuple[str, str]
 
 
 def render_plot(fig: Figure, series: List[PlotSeries]) -> None:
-    """Render series into matplotlib Figure."""
     fig.clear()
     ax = fig.add_subplot(111)
 

@@ -8,18 +8,14 @@ from typing import Optional, List, Dict, Tuple
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from .sbs_config import load_config
-from .sbs_config import SbsConfig
-from .sbs_config import SbsConfigError
+from .sbs_config import load_config, SbsConfig, SbsConfigError
 from .log_parser import parse_log_lines
 from .utils import format_time_us_to_hhmmssus, ParsedRecord
 from .config_editor import ConfigEditor
 from .plotter import build_series, render_plot
 from .updater import check_update
 
-APP_VERSION = '0.1.0-draft'
-
-# Update check URL (GitHub raw URL). Keep empty by default.
+APP_VERSION = '0.2.0-draft'
 UPDATE_JSON_URL = ''
 
 
@@ -49,7 +45,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title('I2C Expert Smart Battery Data Center')
-        self.geometry('1280x820')
+        self.geometry('1380x860')
 
         self.cfg: Optional[SbsConfig] = None
         self.cfg_path: Optional[str] = None
@@ -59,7 +55,6 @@ class App(tk.Tk):
         self._build_layout()
         self._set_menu_state()
 
-    # ---------------- UI build ----------------
     def _build_menu(self):
         menubar = tk.Menu(self)
 
@@ -94,44 +89,48 @@ class App(tk.Tk):
         self.cfg_name_var = tk.StringVar(value='(None)')
         ttk.Label(topbar, textvariable=self.cfg_name_var, foreground='#1d4ed8').pack(side='left', padx=6)
 
-        main = ttk.PanedWindow(self, orient='horizontal')
+        # Main window layout requirement:
+        # - Top half: data table
+        # - Bottom left: bit field
+        # - Bottom right: plot
+        main = ttk.PanedWindow(self, orient='vertical')
         main.pack(fill='both', expand=True, padx=10, pady=10)
 
-        # Left: log list
-        left = ttk.Frame(main)
-        main.add(left, weight=3)
+        top = ttk.Frame(main)
+        main.add(top, weight=3)
 
+        bottom = ttk.PanedWindow(main, orient='horizontal')
+        main.add(bottom, weight=2)
+
+        # Top: data table
         cols = ('Time', 'RW', 'Device Address', 'Function', 'Value', 'Unit', 'Data')
-        self.tree = ttk.Treeview(left, columns=cols, show='headings', height=22)
+        self.tree = ttk.Treeview(top, columns=cols, show='headings', height=18)
         for c in cols:
             self.tree.heading(c, text=c)
             if c == 'Data':
-                self.tree.column(c, width=420, anchor='w')
+                self.tree.column(c, width=520, anchor='w')
             elif c == 'Function':
-                self.tree.column(c, width=240, anchor='w')
+                self.tree.column(c, width=260, anchor='w')
             else:
                 self.tree.column(c, width=120, anchor='w')
         self.tree.pack(side='left', fill='both', expand=True)
 
-        ysb = ttk.Scrollbar(left, orient='vertical', command=self.tree.yview)
+        ysb = ttk.Scrollbar(top, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscroll=ysb.set)
         ysb.pack(side='left', fill='y')
 
         self.tree.bind('<<TreeviewSelect>>', self.on_select_record)
 
-        # Right: bitfield + plot
-        right = ttk.PanedWindow(main, orient='vertical')
-        main.add(right, weight=2)
-
-        bf_frame = ttk.LabelFrame(right, text='Bit Field')
-        right.add(bf_frame, weight=1)
-
+        # Bottom left: bit field
+        bf_frame = ttk.LabelFrame(bottom, text='Bit Field')
+        bottom.add(bf_frame, weight=1)
         self.bit_container = ttk.Frame(bf_frame)
         self.bit_container.pack(fill='both', expand=True, padx=8, pady=8)
         self._render_bitfield(None)
 
-        plot_frame = ttk.LabelFrame(right, text='Plot')
-        right.add(plot_frame, weight=2)
+        # Bottom right: plot
+        plot_frame = ttk.LabelFrame(bottom, text='Plot')
+        bottom.add(plot_frame, weight=2)
 
         controls = ttk.Frame(plot_frame)
         controls.pack(fill='x', padx=8, pady=(8, 4))
@@ -146,7 +145,7 @@ class App(tk.Tk):
 
         ttk.Button(controls, text='Refresh Plot', command=self.refresh_plot).pack(side='right')
 
-        self.fig = Figure(figsize=(5, 4), dpi=100)
+        self.fig = Figure(figsize=(6, 4), dpi=100)
         self.canvas = FigureCanvasTkAgg(self.fig, master=plot_frame)
         self.canvas.get_tk_widget().pack(fill='both', expand=True, padx=8, pady=8)
 
@@ -154,7 +153,6 @@ class App(tk.Tk):
         self.canvas.draw()
 
     def _set_menu_state(self):
-        # Load Log requires config
         if self.cfg is None:
             self.file_menu.entryconfig('Load Log', state='disabled')
             self.edit_menu.entryconfig('Modify SBS Config', state='disabled')
@@ -162,13 +160,10 @@ class App(tk.Tk):
             self.file_menu.entryconfig('Load Log', state='normal')
             self.edit_menu.entryconfig('Modify SBS Config', state='normal')
 
-    # ---------------- Menu callbacks ----------------
+    # -------- Menu callbacks --------
     def on_new_config(self):
-        # Load from bundled default file
         try:
-            import importlib.resources as res
             from pathlib import Path
-            # fallback to assets path relative to project
             p = Path(__file__).resolve().parent.parent / 'assets' / 'default_sbs_config.json'
             self.cfg = load_config(p)
             self.cfg_name_var.set(p.name)
@@ -192,7 +187,6 @@ class App(tk.Tk):
             self.cfg_name_var.set(path.split('/')[-1])
             messagebox.showinfo('Config', f'Loaded config: {path}')
             self._set_menu_state()
-            # If records already loaded, re-parse to refresh decoded view
             if self.records:
                 self.refresh_table()
                 self.refresh_plot()
@@ -206,7 +200,6 @@ class App(tk.Tk):
             return
         editor = ConfigEditor(self, self.cfg)
         self.wait_window(editor)
-        # after editor close, refresh decoding
         if self.records:
             self.refresh_table()
             self.refresh_plot()
@@ -228,8 +221,7 @@ class App(tk.Tk):
             try:
                 with open(path, 'r', encoding='utf-8', errors='replace') as f:
                     lines = f.readlines()
-                recs = parse_log_lines(lines, self.cfg)
-                self.records = recs
+                self.records = parse_log_lines(lines, self.cfg)
                 self.after(0, lambda: self._on_log_loaded(dlg, path))
             except Exception as e:
                 self.after(0, lambda: self._on_log_error(dlg, e))
@@ -253,7 +245,6 @@ class App(tk.Tk):
         if not q:
             return
         q = q.strip().lower()
-        # find first match
         for idx, r in enumerate(self.records):
             if q in (r.function or '').lower() or q in (r.data_raw or '').lower():
                 iid = str(idx)
@@ -273,9 +264,8 @@ class App(tk.Tk):
         else:
             messagebox.showwarning('Update', res.message)
 
-    # ---------------- Table & selection ----------------
+    # -------- Table & selection --------
     def refresh_table(self):
-        # Clear
         for i in self.tree.get_children():
             self.tree.delete(i)
 
@@ -297,10 +287,9 @@ class App(tk.Tk):
             self._render_bitfield(None)
             return
         idx = int(sel[0])
-        r = self.records[idx]
-        self._render_bitfield(r)
+        self._render_bitfield(self.records[idx])
 
-    # ---------------- Bit field view ----------------
+    # -------- Bit field view --------
     def _render_bitfield(self, rec: Optional[ParsedRecord]):
         for w in self.bit_container.winfo_children():
             w.destroy()
@@ -309,7 +298,6 @@ class App(tk.Tk):
             ttk.Label(self.bit_container, text='(No selection)').pack(anchor='w')
             return
 
-        # Find definition
         try:
             cc_norm = f"0x{int(rec.command_code, 16):02X}"
         except Exception:
@@ -324,24 +312,22 @@ class App(tk.Tk):
             ttk.Label(self.bit_container, text='(No bit-field definition)').pack(anchor='w')
             return
 
-        # Build 16-bit bit list from bytes_le
         bits = []
         for bi, b in enumerate(rec.bytes_le):
             for bit in range(8):
                 bits.append((bi * 8 + bit, (b >> bit) & 1))
 
-        # Render per byte table
         for bi in range(max(1, len(rec.bytes_le))):
             frame = ttk.LabelFrame(self.bit_container, text=f'Byte {bi}')
             frame.pack(fill='x', pady=6)
-            # header
+
             hdr = ttk.Frame(frame)
             hdr.pack(fill='x')
-            # show 7..0 in display order
             for bit in range(7, -1, -1):
                 idx = bi * 8 + bit
                 title = d.bitfield.get(str(idx), f'bit{idx}')
                 ttk.Label(hdr, text=title, borderwidth=1, relief='solid', padding=3).pack(side='left', fill='x', expand=True)
+
             row = ttk.Frame(frame)
             row.pack(fill='x')
             for bit in range(7, -1, -1):
@@ -353,7 +339,7 @@ class App(tk.Tk):
                         break
                 ttk.Label(row, text=str(val), borderwidth=1, relief='solid', padding=3).pack(side='left', fill='x', expand=True)
 
-    # ---------------- Plot ----------------
+    # -------- Plot --------
     def refresh_plot(self):
         if not self.records:
             render_plot(self.fig, [])

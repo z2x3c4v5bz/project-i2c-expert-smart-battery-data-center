@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Optional, List
-
-HEX_TOKEN_RE = re.compile(r"^[0-9A-Fa-f]{2}(#)?$")
 
 
 def safe_int(s: str, base: int = 10, default: int = 0) -> int:
@@ -30,10 +27,7 @@ def strip_us_unit(ts: str) -> str:
 
 
 def format_time_us_to_hhmmssus(us: int) -> str:
-    """Format a microsecond timestamp into hh:mm:ss:us.
-
-    Note: The input in I2C Expert log is treated as microseconds (us).
-    """
+    """Format microsecond timestamp into hh:mm:ss:us."""
     if us < 0:
         us = 0
     total_seconds, micro = divmod(us, 1_000_000)
@@ -43,7 +37,7 @@ def format_time_us_to_hhmmssus(us: int) -> str:
 
 
 def normalize_hex_token(tok: str) -> tuple[str, bool]:
-    """Normalize hex byte token, detect NACK marker (#).
+    """Normalize hex byte token and detect NACK marker (#).
 
     Returns:
         (hex_byte_upper, is_nack)
