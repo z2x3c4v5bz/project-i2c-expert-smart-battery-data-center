@@ -1,13 +1,17 @@
-# I2C Expert Smart Battery Data Center (v0.4 draft)
+# I2C Expert Smart Battery Data Center (v0.5 draft)
 
 ## Highlights
-- Valid record threshold: >= 1 data byte (instead of >= 2)
-- Persistent filter toolbar (Device / Command / Hide Invalid)
-- Filter status: multi-condition summary + visible/total count
-- View menu added: Show/Hide plot
-- Bit Field area: fixed x-scrollbar placement + fixed cell widths
-- Main & Config Editor open maximized by default (BitFieldEditor stays normal)
-- Parsing improvement: reverse data byte order before decoding (e.g., 01 E9 -> E9 01)
+- Main table: added Index column (global index, not affected by filters)
+- Search redesigned:
+  - Find Next / Find Previous for Command Code, Raw Data, RW
+  - Wrap-around search (top<->bottom); if no match after one full loop, notify user
+  - Go to Index (exact定位, no wrap)
+- Bit Field display: High byte on top, Low byte on bottom
+- SBS Config Editor:
+  - Resizable left list / right detail using PanedWindow (draggable sash)
+  - Maximize/Restore enabled (resizable + OS window buttons)
+  - BitField edit is buffered: changes take effect only after "Apply Changes"
+  - Save / Save As writes to file; closing without saving prompts to Discard or Cancel
 
 ## Run
 ```bash

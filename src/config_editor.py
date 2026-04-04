@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Dict, Optional, Tuple
@@ -30,16 +31,22 @@ def _validate_unique_functions(cfg: SbsConfig) -> Tuple[bool, str]:
 
 
 class BitFieldEditor(tk.Toplevel):
-    """Bit field editor for a single Command Code (dynamic bit index)."""
+    """Edit BitField mapping in an isolated buffer.
 
-    def __init__(self, master: tk.Misc, bitfield: Dict[str, str], cc: str):
+    Important (English):
+      - This editor does NOT apply to config immediately.
+      - Changes take effect only after the user clicks "Apply Changes" in SBS Config Editor.
+    """
+
+    def __init__(self, master: tk.Misc, initial: Dict[str, str], cc: str):
         super().__init__(master)
         self.title(f'Edit Bit Field - {cc}')
         self.geometry('740x520')
         self.minsize(660, 460)
         self.resizable(True, True)
 
-        self.bitfield = bitfield
+        self._work = copy.deepcopy(initial) if isinstance(initial, dict) else {}
+        self.result: Optional[Dict[str, str]] = None
 
         cols = ('Bit', 'Function')
         self.tree = ttk.Treeview(self, columns=cols, show='headings', height=16)
@@ -72,7 +79,8 @@ class BitFieldEditor(tk.Toplevel):
 
         bottom = ttk.Frame(self)
         bottom.grid(row=3, column=0, columnspan=4, sticky='ew', padx=10, pady=(0, 10))
-        ttk.Button(bottom, text='Close', command=self.on_close).pack(side='right')
+        ttk.Button(bottom, text='OK', command=self.on_ok).pack(side='right', padx=6)
+        ttk.Button(bottom, text='Cancel', command=self.on_cancel).pack(side='right')
 
         self.rowconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)
@@ -93,8 +101,8 @@ class BitFieldEditor(tk.Toplevel):
             except Exception:
                 return 10**9
 
-        for bit in sorted(self.bitfield.keys(), key=sort_key):
-            self.tree.insert('', 'end', iid=str(bit), values=(str(bit), self.bitfield[bit]))
+        for bit in sorted(self._work.keys(), key=sort_key):
+            self.tree.insert('', 'end', iid=str(bit), values=(str(bit), self._work[bit]))
 
     def on_add(self):
         bit_txt = self.bit_var.get().strip()
@@ -117,7 +125,7 @@ class BitFieldEditor(tk.Toplevel):
             messagebox.showerror('Input', 'Bit Index out of range. Allowed: 0~1023.', parent=self)
             return
 
-        self.bitfield[str(bit_int)] = fn_txt
+        self._work[str(bit_int)] = fn_txt
         self._populate()
 
     def on_delete(self):
@@ -125,24 +133,40 @@ class BitFieldEditor(tk.Toplevel):
         if not sel:
             return
         bit = sel[0]
-        if bit in self.bitfield:
-            del self.bitfield[bit]
+        if bit in self._work:
+            del self._work[bit]
         self._populate()
 
-    def on_close(self):
+    def on_ok(self):
+        self.result = copy.deepcopy(self._work)
+        self.grab_release()
+        self.destroy()
+
+    def on_cancel(self):
+        self.result = None
         self.grab_release()
         self.destroy()
 
 
 class ConfigEditor(tk.Toplevel):
-    """Modal SBS config editor window."""
+    """Modal SBS config editor window.
+
+    UX updates:
+      - Left tree and right detail are resizable using a PanedWindow.
+      - Unsaved changes prompt when closing without Save/Save As.
+      - BitField changes require Apply Changes to take effect.
+
+    Implementation note (English):
+      - We keep an in-memory snapshot of the config when the editor opens.
+      - If user chooses Discard on close, we restore the snapshot.
+    """
 
     def __init__(self, master: tk.Misc, cfg: SbsConfig):
         super().__init__(master)
         self.title('SBS Config Editor')
         self.geometry('1240x760')
         self.minsize(1140, 700)
-        self.resizable(True, True)
+        self.resizable(True, True)  # enables maximize/restore button
 
         try:
             self.state('zoomed')
@@ -150,17 +174,29 @@ class ConfigEditor(tk.Toplevel):
             pass
 
         self.cfg = cfg
+
+        # Snapshot for Discard
+        self._snap_title = copy.deepcopy(cfg.title)
+        self._snap_body = copy.deepcopy(cfg.body)
+
         self._filtered_keys = list(cfg.body.keys())
         self._current_cc: Optional[str] = None
 
+        self._pending_bitfield: Dict[str, Dict[str, str]] = {}
+
+        self._dirty: bool = False
+
         self.protocol('WM_DELETE_WINDOW', self._on_close)
 
+        # Top bar
         top = ttk.Frame(self)
         top.pack(fill='x', padx=10, pady=8)
 
         ttk.Label(top, text='Title:').pack(side='left')
         self.title_var = tk.StringVar(value=self.cfg.title)
-        ttk.Entry(top, textvariable=self.title_var, width=54).pack(side='left', padx=(5, 16))
+        title_ent = ttk.Entry(top, textvariable=self.title_var, width=54)
+        title_ent.pack(side='left', padx=(5, 16))
+        title_ent.bind('<KeyRelease>', lambda e: self._set_dirty(True))
 
         ttk.Label(top, text='Search:').pack(side='left')
         self.search_var = tk.StringVar(value='')
@@ -179,11 +215,18 @@ class ConfigEditor(tk.Toplevel):
         ttk.Button(btns, text='Save As...', command=self._save_as).pack(side='left', padx=4)
         ttk.Button(btns, text='Close', command=self._on_close).pack(side='left', padx=4)
 
-        main = ttk.Frame(self)
-        main.pack(fill='both', expand=True, padx=10, pady=10)
+        # Main split
+        pan = ttk.PanedWindow(self, orient='horizontal')
+        pan.pack(fill='both', expand=True, padx=10, pady=10)
 
+        left = ttk.Frame(pan)
+        right = ttk.Frame(pan)
+        pan.add(left, weight=3)
+        pan.add(right, weight=2)
+
+        # Left tree
         cols = ('Command', 'Function', 'FunctionType', 'Access', 'IsValue', 'Unit')
-        self.tree = ttk.Treeview(main, columns=cols, show='headings', height=24)
+        self.tree = ttk.Treeview(left, columns=cols, show='headings', height=24)
         for c in cols:
             self.tree.heading(c, text=c)
             if c == 'Function':
@@ -192,18 +235,22 @@ class ConfigEditor(tk.Toplevel):
                 self.tree.column(c, width=140, anchor='w')
             else:
                 self.tree.column(c, width=150, anchor='w')
-        self.tree.pack(side='left', fill='both', expand=True)
+        self.tree.grid(row=0, column=0, sticky='nsew')
 
-        ysb = ttk.Scrollbar(main, orient='vertical', command=self.tree.yview)
-        self.tree.configure(yscroll=ysb.set)
-        ysb.pack(side='left', fill='y')
+        l_ysb = ttk.Scrollbar(left, orient='vertical', command=self.tree.yview)
+        self.tree.configure(yscroll=l_ysb.set)
+        l_ysb.grid(row=0, column=1, sticky='ns')
 
-        xsb = ttk.Scrollbar(main, orient='horizontal', command=self.tree.xview)
-        self.tree.configure(xscroll=xsb.set)
-        xsb.pack(side='bottom', fill='x')
+        l_xsb = ttk.Scrollbar(left, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(xscroll=l_xsb.set)
+        l_xsb.grid(row=1, column=0, sticky='ew')
 
-        detail = ttk.LabelFrame(main, text='Selected Command Detail')
-        detail.pack(side='left', fill='y', padx=(12, 0))
+        left.rowconfigure(0, weight=1)
+        left.columnconfigure(0, weight=1)
+
+        # Right detail
+        detail = ttk.LabelFrame(right, text='Selected Command Detail')
+        detail.pack(fill='both', expand=True)
 
         self.cmd_var = tk.StringVar(value='')
         self.fn_var = tk.StringVar(value='')
@@ -225,12 +272,14 @@ class ConfigEditor(tk.Toplevel):
         ttk.Label(detail, text='Function').grid(row=row, column=0, sticky='w', padx=6, pady=4)
         self.fn_ent = ttk.Entry(detail, textvariable=self.fn_var, width=34)
         self.fn_ent.grid(row=row, column=1, sticky='w', padx=6, pady=4)
+        self.fn_ent.bind('<KeyRelease>', lambda e: self._set_dirty(True))
 
         row += 1
         ttk.Label(detail, text='Access').grid(row=row, column=0, sticky='w', padx=6, pady=4)
         self.acc_cb = ttk.Combobox(detail, state='readonly', width=30)
         self.acc_cb['values'] = [f"{k}: {v}" for k, v in ACCESS_TYPE.items()]
         self.acc_cb.grid(row=row, column=1, sticky='w', padx=6, pady=4)
+        self.acc_cb.bind('<<ComboboxSelected>>', lambda e: self._set_dirty(True))
 
         row += 1
         ttk.Label(detail, text='IsValue').grid(row=row, column=0, sticky='w', padx=6, pady=4)
@@ -238,7 +287,9 @@ class ConfigEditor(tk.Toplevel):
 
         row += 1
         ttk.Label(detail, text='Unit').grid(row=row, column=0, sticky='w', padx=6, pady=4)
-        ttk.Entry(detail, textvariable=self.unit_var, width=34).grid(row=row, column=1, sticky='w', padx=6, pady=4)
+        unit_ent = ttk.Entry(detail, textvariable=self.unit_var, width=34)
+        unit_ent.grid(row=row, column=1, sticky='w', padx=6, pady=4)
+        unit_ent.bind('<KeyRelease>', lambda e: self._set_dirty(True))
 
         row += 1
         ttk.Label(detail, text='BitField').grid(row=row, column=0, sticky='w', padx=6, pady=(10, 4))
@@ -252,13 +303,17 @@ class ConfigEditor(tk.Toplevel):
         row += 1
         ttk.Button(detail, text='Apply Changes', command=self._apply_changes).grid(row=row, column=0, columnspan=2, pady=(6, 10))
 
-        self.tree.bind('<<TreeviewSelect>>', self._on_select)
+        detail.columnconfigure(1, weight=1)
 
+        self.tree.bind('<<TreeviewSelect>>', self._on_select)
         self._populate_tree()
 
         self.transient(master)
         self.grab_set()
         self.focus_set()
+
+    def _set_dirty(self, v: bool):
+        self._dirty = self._dirty or v
 
     def _populate_tree(self):
         for i in self.tree.get_children():
@@ -335,21 +390,22 @@ class ConfigEditor(tk.Toplevel):
         if self._current_cc is None:
             self.bf_summary.set('{}')
             return
-        d = self.cfg.body[self._current_cc]
-        if not d.bitfield:
+        bf = self._pending_bitfield.get(self._current_cc, self.cfg.body[self._current_cc].bitfield)
+        if not bf:
             self.bf_summary.set('{}')
-        else:
-            items = sorted(d.bitfield.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 10**9)
-            preview = ', '.join([f"{k}:{v}" for k, v in items[:6]])
-            if len(items) > 6:
-                preview += ', ...'
-            self.bf_summary.set('{' + preview + '}')
+            return
+        items = sorted(bf.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 10**9)
+        preview = ', '.join([f"{k}:{v}" for k, v in items[:6]])
+        if len(items) > 6:
+            preview += ', ...'
+        self.bf_summary.set('{' + preview + '}')
 
     def _on_ft_change(self):
         ft = self.ft_cb.current()
         if ft != 0:
             self.fn_var.set(FUNCTION_TYPE.get(ft, self.fn_var.get()))
         self._sync_function_editable()
+        self._set_dirty(True)
 
     def _sync_function_editable(self):
         ft = self.ft_cb.current()
@@ -357,6 +413,7 @@ class ConfigEditor(tk.Toplevel):
 
     def _on_isv_change(self):
         self._sync_bitfield_button()
+        self._set_dirty(True)
 
     def _sync_bitfield_button(self):
         if self._current_cc is None:
@@ -369,12 +426,13 @@ class ConfigEditor(tk.Toplevel):
             return
         if self.isv_var.get():
             return
-        d = self.cfg.body[self._current_cc]
-        if d.bitfield is None:
-            d.bitfield = {}
-        editor = BitFieldEditor(self, d.bitfield, self._current_cc)
+        base_bf = self._pending_bitfield.get(self._current_cc, self.cfg.body[self._current_cc].bitfield)
+        editor = BitFieldEditor(self, base_bf, self._current_cc)
         self.wait_window(editor)
-        self._refresh_bitfield_summary()
+        if editor.result is not None:
+            self._pending_bitfield[self._current_cc] = editor.result
+            self._refresh_bitfield_summary()
+            self._set_dirty(True)
 
     def _apply_changes(self):
         if self._current_cc is None:
@@ -382,7 +440,7 @@ class ConfigEditor(tk.Toplevel):
             return
 
         cc = self._current_cc
-        d = self.cfg.body[cc]
+        d0 = self.cfg.body[cc]
 
         ft = self.ft_cb.current()
         acc = self.acc_cb.current()
@@ -393,9 +451,9 @@ class ConfigEditor(tk.Toplevel):
         if ft != 0:
             fn = FUNCTION_TYPE.get(ft, fn)
 
-        bitfield = d.bitfield if isinstance(d.bitfield, dict) else {}
-        if isv:
-            bitfield = {}
+        bf = {}
+        if not isv:
+            bf = copy.deepcopy(self._pending_bitfield.get(cc, d0.bitfield))
 
         self.cfg.body[cc] = SbsCommandDef(
             function=fn,
@@ -403,16 +461,20 @@ class ConfigEditor(tk.Toplevel):
             access=acc,
             is_value=isv,
             unit=unit,
-            bitfield=bitfield,
+            bitfield=bf,
         )
 
         self.cfg.title = self.title_var.get().strip() or self.cfg.title
 
+        if cc in self._pending_bitfield:
+            del self._pending_bitfield[cc]
+
         self._insert_or_update_row(cc)
         self.tree.selection_set(cc)
         self._refresh_bitfield_summary()
+        self._set_dirty(True)
 
-        messagebox.showinfo('Applied', f'Updated {cc}', parent=self)
+        messagebox.showinfo('Applied', f'Updated {cc}. (Not saved yet)', parent=self)
 
     def _save(self):
         if not messagebox.askyesno('Save', 'Do you want to save changes to the original file?', parent=self):
@@ -429,6 +491,10 @@ class ConfigEditor(tk.Toplevel):
 
         try:
             save_config(self.cfg, self.cfg.path)
+            # Update snapshot to current saved state
+            self._snap_title = copy.deepcopy(self.cfg.title)
+            self._snap_body = copy.deepcopy(self.cfg.body)
+            self._dirty = False
             messagebox.showinfo('Saved', f'Saved to: {self.cfg.path}', parent=self)
         except Exception as e:
             messagebox.showerror('Save Error', str(e), parent=self)
@@ -453,12 +519,34 @@ class ConfigEditor(tk.Toplevel):
 
         try:
             save_config(self.cfg, path)
-            messagebox.showinfo('Saved', f'Saved to: {path}', parent=self)
             from pathlib import Path
             self.cfg.path = Path(path)
+            # Update snapshot to current saved state
+            self._snap_title = copy.deepcopy(self.cfg.title)
+            self._snap_body = copy.deepcopy(self.cfg.body)
+            self._dirty = False
+            messagebox.showinfo('Saved', f'Saved to: {path}', parent=self)
         except Exception as e:
             messagebox.showerror('Save Error', str(e), parent=self)
 
+    def _restore_snapshot(self):
+        # Restore in-place so main window sees reverted config
+        self.cfg.title = copy.deepcopy(self._snap_title)
+        self.cfg.body = copy.deepcopy(self._snap_body)
+
     def _on_close(self):
+        has_pending = bool(self._pending_bitfield)
+        if self._dirty or has_pending:
+            discard = messagebox.askyesno(
+                'Unsaved Changes',
+                'Your changes have not been saved.\n\nDiscard changes and close?',
+                parent=self,
+                icon='warning'
+            )
+            if not discard:
+                return
+            # Discard: revert to last saved snapshot
+            self._restore_snapshot()
+
         self.grab_release()
         self.destroy()

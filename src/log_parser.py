@@ -13,7 +13,6 @@ class ParseOptions:
     device_addr_width: int = 2
 
 
-# Accept delimiters like "----->" or "-----\\>" (backslash before >)
 _ARROW_RE = re.compile(r"-{5,}\s*(?:>|\\>)")
 
 
@@ -126,7 +125,6 @@ def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRe
                     device = toks[0].upper()
                     cmd = toks[1].upper()
                     bytes_le, is_nack = _bytes_from_tokens_reversed(toks, 2)
-                    # Valid if >= 1 data byte
                     if len(bytes_le) < 1:
                         is_valid = False
 
@@ -147,7 +145,6 @@ def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRe
                     else:
                         device = toks1[0].upper()
                         cmd = toks1[1].upper()
-                        # toks2[0] is device+1, data starts from toks2[1]
                         bytes_le, is_nack = _bytes_from_tokens_reversed(toks2, 1)
                         if len(bytes_le) < 1:
                             is_valid = False

@@ -103,11 +103,7 @@ def load_config(path: str | Path) -> SbsConfig:
 
     body: Dict[str, SbsCommandDef] = {}
     for cc_raw, d in obj['Body'].items():
-        try:
-            cc = canonical_command_code(cc_raw)
-        except Exception:
-            raise SbsConfigError(f'Invalid command code key: {cc_raw}')
-
+        cc = canonical_command_code(cc_raw)
         ft = int(d['FunctionType'])
         fn = str(d['Function'])
         if ft != 0:
