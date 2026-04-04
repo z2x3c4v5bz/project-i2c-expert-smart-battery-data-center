@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Optional
+
+from .utils import ParsedRecord, strip_us_unit, safe_int, format_time_us_to_hhmmssus, normalize_hex_token
+from .sbs_config import SbsConfig
+
+
+@dataclass
+class ParseOptions:
+    device_addr_width: int = 2
+
+
+def _split_time_and_payload(line: str) -> tuple[Optional[int], str, bool]:
+    """Split a valid log line by delimiter '----->'.
+
+    Returns:
+        (time_us, payload, ok)
+    """
+    if '----->' not in line:
+        return None, line.strip(), False
+    left, right = line.split('----->', 1)
+    ts = strip_us_unit(left.strip())
+    if not ts.isdigit():
+        return None, right.strip(), False
+    return safe_int(ts, 10, 0), right.strip(), True
+
+
+def _count_markers(payload: str) -> tuple[int, int]:
+    return payload.count('[S]'), payload.count('[P]')
+
+
+def _extract_between(payload: str, start: str, end: str) -> str:
+    s = payload.find(start)
+    if s < 0:
+        return ''
+    s += len(start)
+    e = payload.find(end, s)
+    if e < 0:
+        return ''
+    return payload[s:e].strip()
+
+
+def _extract_after(payload: str, start: str) -> str:
+    s = payload.find(start)
+    if s < 0:
+        return ''
+    s += len(start)
+    return payload[s:].strip()
+
+
+def _parse_hex_tokens(segment: str) -> List[str]:
+    tokens = [t for t in segment.split() if t]
+    return tokens
+
+
+def _bytes_from_tokens_reversed(tokens: List[str], start_idx: int) -> tuple[List[int], bool]:
+    """Build byte list in little-endian order from token list.
+
+    tokens: list like [addr, cmd, high, low#]
+    start_idx: index of first data byte token
+
+    Returns:
+        (bytes_le, is_nack)
+    """
+    if len(tokens) <= start_idx:
+        return [], False
+
+    is_nack = False
+    data_tokens = tokens[start_idx:]
+    # reverse order: low byte is last token
+    out: List[int] = []
+    for tok in reversed(data_tokens):
+        h, nack = normalize_hex_token(tok)
+        is_nack = is_nack or nack
+        out.append(int(h, 16))
+    return out, is_nack
+
+
+def _decode_value(bytes_le: List[int], is_value: bool) -> str:
+    if not bytes_le:
+        return ''
+    if is_value:
+        # little-endian to int
+        val = 0
+        for i, b in enumerate(bytes_le):
+            val |= (b & 0xFF) << (8 * i)
+        return str(val)
+    else:
+        # show binary of each byte (MSB..LSB)
+        return ' '.join(f"{b:08b}" for b in bytes_le)
+
+
+def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRecord]:
+    records: List[ParsedRecord] = []
+
+    for line in lines:
+        raw = line.rstrip('\n')
+        time_us, payload, has_time = _split_time_and_payload(raw)
+
+        s_cnt, p_cnt = _count_markers(payload)
+        is_valid = has_time and (p_cnt == 1) and (s_cnt in (1, 2))
+
+        rw = ''
+        device = ''
+        cmd = ''
+        function = ''
+        unit = ''
+        value_str = ''
+        is_nack = False
+        bytes_le: List[int] = []
+
+        if is_valid:
+            if s_cnt == 1:
+                rw = 'W'
+                seg = _extract_between(payload, '[S]', '[P]')
+                toks = _parse_hex_tokens(seg)
+                if len(toks) < 3:
+                    is_valid = False
+                else:
+                    device = toks[0].upper()
+                    cmd = toks[1].upper()
+                    bytes_le, is_nack = _bytes_from_tokens_reversed(toks, 2)
+            elif s_cnt == 2:
+                rw = 'R'
+                # first segment between first [S] and second [S]
+                # payload example: [S] 16 09 [S] 17 34 12 [P]
+                # extract in two steps
+                after_first = _extract_after(payload, '[S]')
+                # split at second [S]
+                if '[S]' not in after_first:
+                    is_valid = False
+                else:
+                    part1, part2 = after_first.split('[S]', 1)
+                    toks1 = _parse_hex_tokens(part1)
+                    toks2 = _parse_hex_tokens(_extract_between('[S]' + part2, '[S]', '[P]'))
+                    if len(toks1) != 2:
+                        is_valid = False
+                    elif len(toks2) < 2:
+                        is_valid = False
+                    else:
+                        device = toks1[0].upper()
+                        cmd = toks1[1].upper()
+                        # toks2[0] is device+1, data starts from toks2[1]
+                        bytes_le, is_nack = _bytes_from_tokens_reversed(toks2, 1)
+            else:
+                is_valid = False
+
+        # Decode by config if possible
+        if is_valid and cfg is not None and cmd:
+            cc = cmd
+            if not cc.startswith('0X') and cc.startswith('0x'):
+                cc = cc.upper()
+            if not cc.startswith('0X') and cc.startswith('0'):
+                # already byte
+                pass
+            # normalize command code to 0xNN
+            try:
+                cc_norm = f"0x{int(cmd, 16):02X}"
+            except Exception:
+                cc_norm = ''
+            if cc_norm and cc_norm in cfg.body:
+                d = cfg.body[cc_norm]
+                function = d.function
+                unit = d.unit
+                value_str = _decode_value(bytes_le, d.is_value)
+            else:
+                function = 'Unknown'
+                unit = 'NA'
+                value_str = _decode_value(bytes_le, True)
+
+        # Build record
+        display_time = None
+        time_str = ''
+        if time_us is not None:
+            display_time = time_us
+            time_str = format_time_us_to_hhmmssus(time_us)
+
+        rec = ParsedRecord(
+            time_us=display_time,
+            rw=rw if is_valid else '',
+            device_address=device if is_valid else '',
+            command_code=cmd if is_valid else '',
+            function=function if is_valid else '',
+            value_str=value_str if is_valid else '',
+            unit=unit if is_valid else '',
+            data_raw=payload if has_time else raw,
+            is_valid=is_valid,
+            is_nack=is_nack,
+            bytes_le=bytes_le,
+        )
+        # for table display we want formatted time string; UI can compute from time_us too
+        # but keep time_us in record.
+        records.append(rec)
+
+    return records
