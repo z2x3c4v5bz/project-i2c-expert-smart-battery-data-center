@@ -13,6 +13,7 @@ class ParseOptions:
     device_addr_width: int = 2
 
 
+# Accept delimiters like "----->" or "-----\\>" (backslash before >)
 _ARROW_RE = re.compile(r"-{5,}\s*(?:>|\\>)")
 
 
@@ -59,6 +60,15 @@ def _parse_hex_tokens(segment: str) -> List[str]:
 
 
 def _bytes_from_tokens_reversed(tokens: List[str], start_idx: int) -> tuple[List[int], bool]:
+    """Reverse byte order before decoding.
+
+    Example:
+      - Read: 01 E9#  -> bytes = [E9, 01]
+      - Write: 01 02 03 E9# -> bytes = [E9, 03, 02, 01]
+
+    Notes (English):
+      The log payload is low-byte to high-byte order; we reverse first.
+    """
     if len(tokens) <= start_idx:
         return [], False
 
@@ -116,7 +126,8 @@ def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRe
                     device = toks[0].upper()
                     cmd = toks[1].upper()
                     bytes_le, is_nack = _bytes_from_tokens_reversed(toks, 2)
-                    if len(bytes_le) < 2:
+                    # Valid if >= 1 data byte
+                    if len(bytes_le) < 1:
                         is_valid = False
 
             elif s_cnt == 2:
@@ -136,8 +147,9 @@ def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRe
                     else:
                         device = toks1[0].upper()
                         cmd = toks1[1].upper()
+                        # toks2[0] is device+1, data starts from toks2[1]
                         bytes_le, is_nack = _bytes_from_tokens_reversed(toks2, 1)
-                        if len(bytes_le) < 2:
+                        if len(bytes_le) < 1:
                             is_valid = False
             else:
                 is_valid = False

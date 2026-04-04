@@ -39,7 +39,7 @@ class BitFieldEditor(tk.Toplevel):
         self.minsize(660, 460)
         self.resizable(True, True)
 
-        self.bitfield = bitfield  # reference
+        self.bitfield = bitfield
 
         cols = ('Bit', 'Function')
         self.tree = ttk.Treeview(self, columns=cols, show='headings', height=16)
@@ -143,6 +143,11 @@ class ConfigEditor(tk.Toplevel):
         self.geometry('1240x760')
         self.minsize(1140, 700)
         self.resizable(True, True)
+
+        try:
+            self.state('zoomed')
+        except Exception:
+            pass
 
         self.cfg = cfg
         self._filtered_keys = list(cfg.body.keys())

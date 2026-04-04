@@ -15,7 +15,7 @@ from .config_editor import ConfigEditor
 from .plotter import build_series, render_plot
 from .updater import check_update
 
-APP_VERSION = '0.3.0-draft'
+APP_VERSION = '0.4.0-draft'
 UPDATE_JSON_URL = ''
 
 
@@ -47,6 +47,10 @@ class App(tk.Tk):
         self.title('I2C Expert Smart Battery Data Center')
         self.geometry('1540x920')
         self.minsize(1320, 820)
+        try:
+            self.state('zoomed')
+        except Exception:
+            pass
 
         self.cfg: Optional[SbsConfig] = None
         self.cfg_path: Optional[str] = None
@@ -58,6 +62,8 @@ class App(tk.Tk):
         self.hide_invalid: bool = False
 
         self.visible_indices: List[int] = []
+
+        self.show_plot_var = tk.BooleanVar(value=True)
 
         self._build_menu()
         self._build_layout()
@@ -79,18 +85,6 @@ class App(tk.Tk):
         edit_menu.add_command(label='Modify SBS Config', command=self.on_modify_config)
         edit_menu.add_separator()
 
-        edit_menu.add_command(label='Filter: Device Address...', command=self.on_filter_device)
-        edit_menu.add_command(label='Clear Device Address Filter', command=self.on_clear_filter_device)
-        edit_menu.add_separator()
-
-        edit_menu.add_command(label='Filter: Command Code...', command=self.on_filter_command)
-        edit_menu.add_command(label='Clear Command Code Filter', command=self.on_clear_filter_command)
-        edit_menu.add_separator()
-
-        self.hide_invalid_var = tk.BooleanVar(value=False)
-        edit_menu.add_checkbutton(label='Hide Invalid Records', variable=self.hide_invalid_var, command=self.on_toggle_hide_invalid)
-        edit_menu.add_separator()
-
         search_menu = tk.Menu(edit_menu, tearoff=0)
         search_menu.add_command(label='Search: Command Code...', command=self.on_search_command)
         search_menu.add_command(label='Search: Raw Data...', command=self.on_search_raw)
@@ -98,6 +92,10 @@ class App(tk.Tk):
 
         menubar.add_cascade(label='Edit', menu=edit_menu)
         self.edit_menu = edit_menu
+
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_checkbutton(label='Show Plot', variable=self.show_plot_var, command=self.on_toggle_plot)
+        menubar.add_cascade(label='View', menu=view_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label='About', command=self.on_about)
@@ -120,23 +118,45 @@ class App(tk.Tk):
         ttk.Label(topbar, textvariable=self.log_name_var, foreground='#1d4ed8').pack(side='left', padx=6)
 
         ttk.Label(topbar, text='|').pack(side='left', padx=6)
-        ttk.Label(topbar, text='Filters:').pack(side='left')
+        ttk.Label(topbar, text='Filter Status:').pack(side='left')
         self.filter_summary_var = tk.StringVar(value='(none)')
         ttk.Label(topbar, textvariable=self.filter_summary_var).pack(side='left', padx=6)
 
+        ttk.Label(topbar, text='|').pack(side='left', padx=6)
+        self.count_var = tk.StringVar(value='0/0')
+        ttk.Label(topbar, textvariable=self.count_var).pack(side='left', padx=6)
+
         ttk.Button(topbar, text='Refresh Table', command=self.on_refresh_table).pack(side='right')
+
+        # Filter toolbar
+        fbar = ttk.LabelFrame(self, text='Filters')
+        fbar.pack(fill='x', padx=10, pady=(0, 8))
+
+        ttk.Label(fbar, text='Device Address (hex):').pack(side='left', padx=(10, 4))
+        self.dev_entry = ttk.Entry(fbar, width=10)
+        self.dev_entry.pack(side='left', padx=4)
+
+        ttk.Label(fbar, text='Command Code (hex):').pack(side='left', padx=(14, 4))
+        self.cmd_entry = ttk.Entry(fbar, width=12)
+        self.cmd_entry.pack(side='left', padx=4)
+
+        self.hide_invalid_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(fbar, text='Hide Invalid', variable=self.hide_invalid_var, command=self.on_apply_filters).pack(side='left', padx=(14, 4))
+
+        ttk.Button(fbar, text='Apply', command=self.on_apply_filters).pack(side='left', padx=6)
+        ttk.Button(fbar, text='Clear', command=self.on_clear_filters).pack(side='left', padx=6)
 
         main = ttk.PanedWindow(self, orient='vertical')
         main.pack(fill='both', expand=True, padx=10, pady=10)
 
-        top = ttk.Frame(main)
-        main.add(top, weight=3)
+        self.top = ttk.Frame(main)
+        main.add(self.top, weight=3)
 
-        bottom = ttk.PanedWindow(main, orient='horizontal')
-        main.add(bottom, weight=2)
+        self.bottom = ttk.PanedWindow(main, orient='horizontal')
+        main.add(self.bottom, weight=2)
 
         cols = ('Time', 'RW', 'ACK/NACK', 'Device Address', 'Command Code', 'Function', 'Value', 'Unit', 'Data')
-        self.tree = ttk.Treeview(top, columns=cols, show='headings', height=18)
+        self.tree = ttk.Treeview(self.top, columns=cols, show='headings', height=18)
         for c in cols:
             self.tree.heading(c, text=c)
             if c == 'Data':
@@ -153,41 +173,45 @@ class App(tk.Tk):
                 self.tree.column(c, width=130, anchor='w')
         self.tree.grid(row=0, column=0, sticky='nsew')
 
-        ysb = ttk.Scrollbar(top, orient='vertical', command=self.tree.yview)
+        ysb = ttk.Scrollbar(self.top, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscroll=ysb.set)
         ysb.grid(row=0, column=1, sticky='ns')
 
-        xsb = ttk.Scrollbar(top, orient='horizontal', command=self.tree.xview)
+        xsb = ttk.Scrollbar(self.top, orient='horizontal', command=self.tree.xview)
         self.tree.configure(xscroll=xsb.set)
         xsb.grid(row=1, column=0, sticky='ew')
 
-        top.rowconfigure(0, weight=1)
-        top.columnconfigure(0, weight=1)
+        self.top.rowconfigure(0, weight=1)
+        self.top.columnconfigure(0, weight=1)
 
         self.tree.bind('<<TreeviewSelect>>', self.on_select_record)
 
-        bf_frame = ttk.LabelFrame(bottom, text='Bit Field')
-        bottom.add(bf_frame, weight=1)
+        # Bit Field panel
+        self.bf_frame = ttk.LabelFrame(self.bottom, text='Bit Field')
+        self.bottom.add(self.bf_frame, weight=1)
 
-        self.bf_canvas = tk.Canvas(bf_frame, highlightthickness=0)
-        self.bf_canvas.pack(side='left', fill='both', expand=True)
+        self.bf_canvas = tk.Canvas(self.bf_frame, highlightthickness=0)
+        self.bf_ysb = ttk.Scrollbar(self.bf_frame, orient='vertical', command=self.bf_canvas.yview)
+        self.bf_xsb = ttk.Scrollbar(self.bf_frame, orient='horizontal', command=self.bf_canvas.xview)
 
-        bf_ysb = ttk.Scrollbar(bf_frame, orient='vertical', command=self.bf_canvas.yview)
-        bf_ysb.pack(side='left', fill='y')
-        self.bf_canvas.configure(yscrollcommand=bf_ysb.set)
+        self.bf_canvas.configure(yscrollcommand=self.bf_ysb.set, xscrollcommand=self.bf_xsb.set)
 
-        bf_xsb = ttk.Scrollbar(bf_frame, orient='horizontal', command=self.bf_canvas.xview)
-        bf_xsb.pack(side='bottom', fill='x')
-        self.bf_canvas.configure(xscrollcommand=bf_xsb.set)
+        self.bf_canvas.grid(row=0, column=0, sticky='nsew')
+        self.bf_ysb.grid(row=0, column=1, sticky='ns')
+        self.bf_xsb.grid(row=1, column=0, sticky='ew')
+
+        self.bf_frame.rowconfigure(0, weight=1)
+        self.bf_frame.columnconfigure(0, weight=1)
 
         self.bit_container = ttk.Frame(self.bf_canvas)
         self.bf_canvas.create_window((0, 0), window=self.bit_container, anchor='nw')
         self.bit_container.bind('<Configure>', lambda e: self.bf_canvas.configure(scrollregion=self.bf_canvas.bbox('all')))
 
-        plot_frame = ttk.LabelFrame(bottom, text='Plot')
-        bottom.add(plot_frame, weight=2)
+        # Plot panel
+        self.plot_frame = ttk.LabelFrame(self.bottom, text='Plot')
+        self.bottom.add(self.plot_frame, weight=2)
 
-        controls = ttk.Frame(plot_frame)
+        controls = ttk.Frame(self.plot_frame)
         controls.pack(fill='x', padx=8, pady=(8, 4))
 
         self.plot_vars = {
@@ -201,7 +225,7 @@ class App(tk.Tk):
         ttk.Button(controls, text='Refresh Plot', command=self.refresh_plot).pack(side='right')
 
         self.fig = Figure(figsize=(6, 4), dpi=100)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=plot_frame)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
         self.canvas.get_tk_widget().pack(fill='both', expand=True, padx=8, pady=8)
 
         render_plot(self.fig, [])
@@ -269,6 +293,46 @@ class App(tk.Tk):
             return
         self._parse_current_log(show_message=False)
 
+    def on_toggle_plot(self):
+        if self.show_plot_var.get():
+            try:
+                if self.plot_frame.winfo_manager() == '':
+                    self.bottom.add(self.plot_frame, weight=2)
+            except Exception:
+                pass
+        else:
+            try:
+                self.bottom.forget(self.plot_frame)
+            except Exception:
+                pass
+
+    def on_apply_filters(self):
+        dev = self.dev_entry.get().strip()
+        cmd = self.cmd_entry.get().strip()
+
+        self.filter_device = dev.upper() if dev else None
+
+        if cmd:
+            try:
+                self.filter_cmd = f"0x{int(cmd, 16):02X}"
+            except Exception:
+                messagebox.showerror('Filter', 'Invalid Command Code hex value.', parent=self)
+                return
+        else:
+            self.filter_cmd = None
+
+        self.hide_invalid = bool(self.hide_invalid_var.get())
+        self.apply_filters_and_refresh()
+
+    def on_clear_filters(self):
+        self.filter_device = None
+        self.filter_cmd = None
+        self.hide_invalid = False
+        self.hide_invalid_var.set(False)
+        self.dev_entry.delete(0, 'end')
+        self.cmd_entry.delete(0, 'end')
+        self.apply_filters_and_refresh()
+
     def _parse_current_log(self, show_message: bool):
         if self.log_path is None or self.cfg is None:
             return
@@ -295,74 +359,6 @@ class App(tk.Tk):
     def _on_log_error(self, dlg: ProgressDialog, err: Exception):
         dlg.close()
         messagebox.showerror('Log Error', str(err))
-
-    def on_filter_device(self):
-        q = tk.simpledialog.askstring('Filter: Device Address', 'Enter hex (e.g., 16):', parent=self)
-        if q is None:
-            return
-        q = q.strip()
-        self.filter_device = q.upper() if q else None
-        self.apply_filters_and_refresh()
-
-    def on_clear_filter_device(self):
-        self.filter_device = None
-        self.apply_filters_and_refresh()
-
-    def on_filter_command(self):
-        q = tk.simpledialog.askstring('Filter: Command Code', 'Enter hex (e.g., 2D or 0x2D):', parent=self)
-        if q is None:
-            return
-        q = q.strip()
-        if not q:
-            self.filter_cmd = None
-        else:
-            try:
-                self.filter_cmd = f"0x{int(q, 16):02X}"
-            except Exception:
-                messagebox.showerror('Filter', 'Invalid hex value.', parent=self)
-                return
-        self.apply_filters_and_refresh()
-
-    def on_clear_filter_command(self):
-        self.filter_cmd = None
-        self.apply_filters_and_refresh()
-
-    def on_toggle_hide_invalid(self):
-        self.hide_invalid = bool(self.hide_invalid_var.get())
-        self.apply_filters_and_refresh()
-
-    def apply_filters_and_refresh(self):
-        vis: List[int] = []
-        for i, r in enumerate(self.records):
-            if self.hide_invalid and (not r.is_valid):
-                continue
-            if self.filter_device:
-                if (r.device_address or '').upper() != self.filter_device:
-                    continue
-            if self.filter_cmd:
-                if not r.is_valid:
-                    continue
-                try:
-                    cc = f"0x{int(r.command_code, 16):02X}"
-                except Exception:
-                    cc = ''
-                if cc != self.filter_cmd:
-                    continue
-            vis.append(i)
-
-        self.visible_indices = vis
-        self._update_filter_summary()
-        self.refresh_table()
-
-    def _update_filter_summary(self):
-        parts = []
-        if self.filter_device:
-            parts.append(f"Dev={self.filter_device}")
-        if self.filter_cmd:
-            parts.append(f"Cmd={self.filter_cmd}")
-        if self.hide_invalid:
-            parts.append('HideInvalid')
-        self.filter_summary_var.set(', '.join(parts) if parts else '(none)')
 
     def on_search_command(self):
         if not self.records:
@@ -410,23 +406,66 @@ class App(tk.Tk):
                 return
         messagebox.showinfo('Search', 'No match found (within current filters).', parent=self)
 
+    def apply_filters_and_refresh(self):
+        vis: List[int] = []
+        for i, r in enumerate(self.records):
+            if self.hide_invalid and (not r.is_valid):
+                continue
+
+            if self.filter_device:
+                if (r.device_address or '').upper() != self.filter_device:
+                    continue
+
+            if self.filter_cmd:
+                if not r.is_valid:
+                    continue
+                try:
+                    cc = f"0x{int(r.command_code, 16):02X}"
+                except Exception:
+                    cc = ''
+                if cc != self.filter_cmd:
+                    continue
+
+            vis.append(i)
+
+        self.visible_indices = vis
+        self._update_filter_summary()
+        self.refresh_table()
+
+    def _update_filter_summary(self):
+        parts = []
+        if self.filter_device:
+            parts.append(f"Dev={self.filter_device}")
+        if self.filter_cmd:
+            parts.append(f"Cmd={self.filter_cmd}")
+        parts.append('HideInvalid' if self.hide_invalid else 'ShowInvalid')
+
+        total = len(self.records)
+        visible = len(self.visible_indices)
+        self.filter_summary_var.set(', '.join(parts) if parts else '(none)')
+        self.count_var.set(f"{visible}/{total}")
+
     def refresh_table(self):
         for i in self.tree.get_children():
             self.tree.delete(i)
 
         if not self.visible_indices:
             self.visible_indices = list(range(len(self.records)))
+            self._update_filter_summary()
 
         for view_row, idx in enumerate(self.visible_indices):
             r = self.records[idx]
+
             time_str = format_time_us_to_hhmmssus(r.time_us) if (r.time_us is not None) else ''
             ack_str = 'NA' if (r.is_valid and r.is_nack) else ('A' if r.is_valid else '')
+
             cmd_str = ''
             if r.is_valid:
                 try:
                     cmd_str = f"0x{int(r.command_code, 16):02X}"
                 except Exception:
                     cmd_str = r.command_code
+
             self.tree.insert('', 'end', iid=str(view_row), values=(
                 time_str,
                 r.rw if r.is_valid else '',
@@ -477,6 +516,8 @@ class App(tk.Tk):
             ttk.Label(self.bit_container, text='(No bit-field definition)').pack(anchor='w')
             return
 
+        CELL_W = 14
+
         bits = []
         for bi, b in enumerate(rec.bytes_le):
             for bit in range(8):
@@ -485,22 +526,25 @@ class App(tk.Tk):
         for bi in range(max(1, len(rec.bytes_le))):
             frame = ttk.LabelFrame(self.bit_container, text=f'Byte {bi}')
             frame.pack(fill='x', pady=6)
-            hdr = ttk.Frame(frame)
-            hdr.pack(fill='x')
-            for bit in range(7, -1, -1):
+
+            for col in range(8):
+                frame.columnconfigure(col, weight=0)
+
+            for col, bit in enumerate(range(7, -1, -1)):
                 idx = bi * 8 + bit
                 title = d.bitfield.get(str(idx), f'bit{idx}')
-                ttk.Label(hdr, text=title, borderwidth=1, relief='solid', padding=3).pack(side='left', fill='x', expand=True)
-            row = ttk.Frame(frame)
-            row.pack(fill='x')
-            for bit in range(7, -1, -1):
+                lbl = ttk.Label(frame, text=title, width=CELL_W, anchor='center', borderwidth=1, relief='solid')
+                lbl.grid(row=0, column=col, sticky='nsew', padx=1, pady=1)
+
+            for col, bit in enumerate(range(7, -1, -1)):
                 idx = bi * 8 + bit
                 val = 0
                 for k, v in bits:
                     if k == idx:
                         val = v
                         break
-                ttk.Label(row, text=str(val), borderwidth=1, relief='solid', padding=3).pack(side='left', fill='x', expand=True)
+                lbl = ttk.Label(frame, text=str(val), width=CELL_W, anchor='center', borderwidth=1, relief='solid')
+                lbl.grid(row=1, column=col, sticky='nsew', padx=1, pady=1)
 
     def refresh_plot(self):
         if not self.records:
