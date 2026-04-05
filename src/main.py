@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 import threading
 from typing import Optional, List, Dict, Tuple
 
@@ -15,8 +15,8 @@ from .config_editor import ConfigEditor
 from .plotter import build_series, render_plot
 from .updater import check_update
 
-APP_VERSION = '0.7.0-draft'
-UPDATE_JSON_URL = ''
+APP_VERSION = '0.8.0-draft'
+UPDATE_JSON_URL = 'https://raw.githubusercontent.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/main/update.json'
 
 
 class ProgressDialog(tk.Toplevel):
@@ -44,10 +44,9 @@ class ProgressDialog(tk.Toplevel):
 class SearchDialog(tk.Toplevel):
     """Search dialog with Find Previous / Find Next.
 
-    English note:
-      - Uses current selection as anchor.
-      - If nothing is selected, anchors to the first visible record.
-      - Wrap-around search within current filtered view.
+    Requested UX:
+      - No extra Close button (close via window [X]).
+      - Center on main window.
     """
 
     def __init__(self, master: 'App', field: str, title: str, prompt: str, initial: str = ''):
@@ -56,20 +55,31 @@ class SearchDialog(tk.Toplevel):
         self.field = field
 
         self.title(title)
-        self.geometry('420x150')
+        self.geometry('340x135')
         self.resizable(False, False)
+
+        # Center on parent
+        self.update_idletasks()
+        try:
+            pw = master.winfo_width(); ph = master.winfo_height()
+            px = master.winfo_rootx(); py = master.winfo_rooty()
+            w = self.winfo_width(); h = self.winfo_height()
+            x = px + int((pw - w) / 2)
+            y = py + int((ph - h) / 2)
+            self.geometry(f'{w}x{h}+{x}+{y}')
+        except Exception:
+            pass
 
         frm = ttk.Frame(self)
         frm.pack(fill='both', expand=True, padx=12, pady=12)
 
         ttk.Label(frm, text=prompt).grid(row=0, column=0, sticky='w')
         self.var = tk.StringVar(value=initial)
-        ent = ttk.Entry(frm, textvariable=self.var, width=34)
-        ent.grid(row=1, column=0, columnspan=3, sticky='ew', pady=(6, 8))
+        ent = ttk.Entry(frm, textvariable=self.var, width=28)
+        ent.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(6, 8))
 
         ttk.Button(frm, text='Find Previous', command=lambda: self._do_find(-1)).grid(row=2, column=0, sticky='w', padx=(0, 8))
         ttk.Button(frm, text='Find Next', command=lambda: self._do_find(+1)).grid(row=2, column=1, sticky='w')
-        ttk.Button(frm, text='Close', command=self.destroy).grid(row=2, column=2, sticky='e')
 
         frm.columnconfigure(1, weight=1)
 
@@ -106,7 +116,8 @@ class App(tk.Tk):
         self.hide_invalid: bool = False
         self.visible_indices: List[int] = []
 
-        self.show_plot_var = tk.BooleanVar(value=True)
+        # Plot default hidden
+        self.show_plot_var = tk.BooleanVar(value=False)
 
         self._last_search: Dict[str, str] = {}
         self._search_windows: Dict[str, SearchDialog] = {}
@@ -291,6 +302,13 @@ class App(tk.Tk):
 
         self._render_bitfield(None)
 
+        # Hide plot by default
+        if not self.show_plot_var.get():
+            try:
+                self.bottom.forget(self.plot_frame)
+            except Exception:
+                pass
+
     def _set_menu_state(self):
         if self.cfg is None:
             self.file_menu.entryconfig('Load Log', state='disabled')
@@ -346,7 +364,6 @@ class App(tk.Tk):
         self._parse_current_log(show_message=True)
 
     def on_save_photo(self):
-        """Save current plot as an image file."""
         if self.fig is None:
             messagebox.showwarning('Save Photo', 'No plot available.', parent=self)
             return
@@ -549,7 +566,7 @@ class App(tk.Tk):
             ttk.Label(self.bit_container, text='(No byte data)').pack(anchor='w')
             return
 
-        # Display high byte first
+        # Display high byte first (byte index is list index because bytes_le is low->high)
         for bi in range(n - 1, -1, -1):
             b = rec.bytes_le[bi]
             frame = ttk.LabelFrame(self.bit_container, text=f'Byte {bi}')
@@ -653,7 +670,7 @@ class App(tk.Tk):
     def on_goto_index(self):
         if not self.records:
             return
-        q = tk.simpledialog.askstring('Go to Index', 'Enter record index (0-based integer):', parent=self)
+        q = simpledialog.askstring('Go to Index', 'Enter record index (0-based integer):', parent=self)
         if q is None or q.strip() == '':
             return
         try:
@@ -708,6 +725,7 @@ class App(tk.Tk):
         render_plot(self.fig, series)
         self.canvas.draw()
 
+    # ---------- Help ----------
     def on_about(self):
         messagebox.showinfo('About', f'I2C Expert Smart Battery Data Center\nVersion: {APP_VERSION}\nUI: tkinter\nPlot: matplotlib')
 

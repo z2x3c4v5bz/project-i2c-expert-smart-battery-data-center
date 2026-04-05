@@ -59,15 +59,7 @@ def _parse_hex_tokens(segment: str) -> List[str]:
 
 
 def _bytes_from_tokens_low_to_high(tokens: List[str], start_idx: int) -> tuple[List[int], bool]:
-    """Parse bytes in the original log order (low-byte -> high-byte).
-
-    Example:
-      payload bytes: 96 2F#  => bytes_le = [0x96, 0x2F]
-
-    English note:
-      SMBus/Smart Battery word data is typically little-endian (low byte first),
-      so we keep this order for isValue decoding.
-    """
+    """Parse bytes in the original log order (low-byte -> high-byte)."""
     if len(tokens) <= start_idx:
         return [], False
 
@@ -87,7 +79,11 @@ def _decode_value(bytes_le: List[int], is_value: bool) -> str:
     """Decode bytes.
 
     - is_value=True: little-endian decoding (low->high) to decimal.
-    - is_value=False: show binary strings for each byte.
+    - is_value=False: show binary strings in **high->low** order (UI requirement).
+
+    English note:
+      We keep bytes_le as low->high internally for correct numeric decoding.
+      For binary display, we reverse order only in string formatting.
     """
     if not bytes_le:
         return ''
@@ -98,7 +94,7 @@ def _decode_value(bytes_le: List[int], is_value: bool) -> str:
             val |= (b & 0xFF) << (8 * i)
         return str(val)
 
-    return ' '.join(f"{b:08b}" for b in bytes_le)
+    return ' '.join(f"{b:08b}" for b in reversed(bytes_le))
 
 
 def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRecord]:
