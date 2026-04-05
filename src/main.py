@@ -8,14 +8,14 @@ from typing import Optional, List, Dict, Tuple
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
  
-from .sbs_config import load_config, SbsConfig, SbsConfigError
-from .log_parser import parse_log_lines
+from .sbs_config import load_config, SbsConfig, SbsConfigError, create_default_config
+from .log_parser import parse_log_lines, ParseOptions
 from .utils import format_time_us_to_hhmmssus, ParsedRecord
 from .config_editor import ConfigEditor
 from .plotter import build_series, render_plot
 from .updater import check_update
 
-APP_VERSION = '0.8.1-draft'
+APP_VERSION = '0.9.0-draft'
 UPDATE_JSON_URL = 'https://raw.githubusercontent.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/refs/heads/main/update.json'
 
 
@@ -119,6 +119,9 @@ class App(tk.Tk):
         # Plot default hidden
         self.show_plot_var = tk.BooleanVar(value=False)
 
+        # Log time format
+        self.time_format_var = tk.StringVar(value='legacy')
+
         self._last_search: Dict[str, str] = {}
         self._search_windows: Dict[str, SearchDialog] = {}
 
@@ -202,6 +205,12 @@ class App(tk.Tk):
 
         self.hide_invalid_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(fbar, text='Hide Invalid', variable=self.hide_invalid_var, command=self.on_apply_filters).pack(side='left', padx=(14, 4))
+
+        ttk.Label(fbar, text='Log Time Format:').pack(side='left', padx=(14, 4))
+        self.time_format_cb = ttk.Combobox(fbar, textvariable=self.time_format_var, state='readonly', width=10)
+        self.time_format_cb['values'] = ['legacy', 'new']
+        self.time_format_cb.pack(side='left', padx=4)
+        self.time_format_cb.bind('<<ComboboxSelected>>', lambda e: self.on_time_format_change())
 
         ttk.Button(fbar, text='Apply', command=self.on_apply_filters).pack(side='left', padx=6)
         ttk.Button(fbar, text='Clear', command=self.on_clear_filters).pack(side='left', padx=6)
@@ -322,13 +331,14 @@ class App(tk.Tk):
     # ---------- Actions ----------
     def on_new_config(self):
         try:
-            from pathlib import Path
-            p = Path(__file__).resolve().parent.parent / 'assets' / 'default_sbs_config.json'
-            self.cfg = load_config(p)
-            self.cfg_name_var.set(p.name)
-            self.cfg_path = str(p)
-            messagebox.showinfo('Config', 'New config created from default template.')
-            self._set_menu_state()
+            cfg = create_default_config()
+            editor = ConfigEditor(self, cfg, is_new=True)
+            self.wait_window(editor)
+            if cfg.path is not None:  # Saved successfully
+                self.cfg = cfg
+                self.cfg_path = str(cfg.path)
+                self.cfg_name_var.set(cfg.path.name)
+                self._set_menu_state()
         except Exception as e:
             messagebox.showerror('Error', f'Failed to create new config: {e}')
 
@@ -436,12 +446,16 @@ class App(tk.Tk):
             try:
                 with open(self.log_path, 'r', encoding='utf-8', errors='replace') as f:
                     lines = f.readlines()
-                self.records = parse_log_lines(lines, self.cfg)
+                self.records = parse_log_lines(lines, self.cfg, ParseOptions(time_format=self.time_format_var.get()))
                 self.after(0, lambda: self._on_log_parsed(dlg, show_message))
             except Exception as e:
                 self.after(0, lambda: self._on_log_error(dlg, e))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def on_time_format_change(self):
+        if self.log_path is not None:
+            self._parse_current_log(show_message=False)
 
     def _on_log_parsed(self, dlg: ProgressDialog, show_message: bool):
         dlg.close()

@@ -11,12 +11,13 @@ from .sbs_config import SbsConfig
 @dataclass
 class ParseOptions:
     device_addr_width: int = 2
+    time_format: str = 'legacy'  # 'legacy' or 'new'
 
 
 _ARROW_RE = re.compile(r"-{5,}\s*(?:>|\\>)")
 
 
-def _split_time_and_payload(line: str) -> tuple[Optional[int], str, bool]:
+def _split_time_and_payload(line: str, options: ParseOptions) -> tuple[Optional[int], str, bool]:
     m = _ARROW_RE.search(line)
     if not m:
         return None, line.strip(), False
@@ -24,7 +25,18 @@ def _split_time_and_payload(line: str) -> tuple[Optional[int], str, bool]:
     left = line[:m.start()].strip()
     right = line[m.end():].strip()
 
-    ts = strip_us_unit(left)
+    if options.time_format == 'new':
+        # New format: "2026/04/05 14:19:25 (000000345843us) ----->"
+        import re
+        match = re.search(r'\((\d+)us\)', left)
+        if match:
+            ts = match.group(1)
+        else:
+            return None, right, False
+    else:
+        # Legacy format: "345843us ----->"
+        ts = strip_us_unit(left)
+
     if not ts.isdigit():
         return None, right, False
 
@@ -97,12 +109,12 @@ def _decode_value(bytes_le: List[int], is_value: bool) -> str:
     return ' '.join(f"{b:08b}" for b in reversed(bytes_le))
 
 
-def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig]) -> List[ParsedRecord]:
+def parse_log_lines(lines: List[str], cfg: Optional[SbsConfig], options: ParseOptions = ParseOptions()) -> List[ParsedRecord]:
     records: List[ParsedRecord] = []
 
     for line in lines:
         raw = line.rstrip('\n')
-        time_us, payload, has_time = _split_time_and_payload(raw)
+        time_us, payload, has_time = _split_time_and_payload(raw, options)
 
         s_cnt, p_cnt = _count_markers(payload)
         is_valid = has_time and (p_cnt == 1) and (s_cnt in (1, 2))

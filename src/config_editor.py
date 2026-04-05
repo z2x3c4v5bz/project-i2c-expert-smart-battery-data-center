@@ -128,12 +128,14 @@ class BitFieldEditor(tk.Toplevel):
 
 
 class ConfigEditor(tk.Toplevel):
-    def __init__(self, master: tk.Misc, cfg: SbsConfig):
+    def __init__(self, master: tk.Misc, cfg: SbsConfig, is_new: bool = False):
         super().__init__(master)
         self.title('SBS Config Editor')
         self.geometry('1240x760')
         self.minsize(1140, 700)
         self.resizable(True, True)
+
+        self.is_new = is_new
 
         # Remove minimize & maximize buttons (Windows only)
         self.update_idletasks()
@@ -188,7 +190,8 @@ class ConfigEditor(tk.Toplevel):
 
         btns = ttk.Frame(top)
         btns.pack(side='right')
-        ttk.Button(btns, text='Save', command=self._save).pack(side='left', padx=4)
+        if not self.is_new:
+            ttk.Button(btns, text='Save', command=self._save).pack(side='left', padx=4)
         ttk.Button(btns, text='Save As...', command=self._save_as).pack(side='left', padx=4)
         ttk.Button(btns, text='Close', command=self._on_close).pack(side='left', padx=4)
 
@@ -461,6 +464,11 @@ class ConfigEditor(tk.Toplevel):
         messagebox.showinfo('Applied', f'Updated {cc}. (Not saved yet)', parent=self)
 
     def _save(self):
+        title = self.title_var.get().strip()
+        if not title:
+            messagebox.showerror('Save', 'Title cannot be empty.', parent=self)
+            return
+
         if not messagebox.askyesno('Save', 'Do you want to save changes to the original file?', parent=self):
             return
 
@@ -473,6 +481,7 @@ class ConfigEditor(tk.Toplevel):
             self._save_as()
             return
 
+        self.cfg.title = title
         try:
             save_config(self.cfg, self.cfg.path)
             self._snap_title = copy.deepcopy(self.cfg.title)
@@ -483,6 +492,11 @@ class ConfigEditor(tk.Toplevel):
             messagebox.showerror('Save Error', str(e), parent=self)
 
     def _save_as(self):
+        title = self.title_var.get().strip()
+        if not title:
+            messagebox.showerror('Save As', 'Title cannot be empty.', parent=self)
+            return
+
         path = filedialog.asksaveasfilename(
             parent=self,
             defaultextension='.json',
@@ -500,6 +514,7 @@ class ConfigEditor(tk.Toplevel):
             messagebox.showerror('Save As', msg, parent=self)
             return
 
+        self.cfg.title = title
         try:
             save_config(self.cfg, path)
             from pathlib import Path
@@ -522,15 +537,28 @@ class ConfigEditor(tk.Toplevel):
 
         has_pending_any = bool(self._pending_bitfield)
         if self._dirty or has_pending_any:
-            discard = messagebox.askyesno(
-                'Unsaved Changes',
-                'Your changes have not been saved.\n\nDiscard changes and close?\n(Choose No to cancel and use Save / Save As.)',
-                parent=self,
-                icon='warning'
-            )
-            if not discard:
-                return
-            self._restore_snapshot()
+            if self.is_new:
+                save_first = messagebox.askyesno(
+                    'Save Required',
+                    'This is a new configuration that must be saved.\n\nSave now?\n(Choose No to cancel and use Save As.)',
+                    parent=self,
+                    icon='warning'
+                )
+                if save_first:
+                    self._save_as()
+                    return  # Don't close if save was attempted
+                else:
+                    return  # Cancel close
+            else:
+                discard = messagebox.askyesno(
+                    'Unsaved Changes',
+                    'Your changes have not been saved.\n\nDiscard changes and close?\n(Choose No to cancel and use Save / Save As.)',
+                    parent=self,
+                    icon='warning'
+                )
+                if not discard:
+                    return
+                self._restore_snapshot()
 
         self.grab_release()
         self.destroy()
