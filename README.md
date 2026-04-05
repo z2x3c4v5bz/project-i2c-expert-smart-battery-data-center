@@ -14,7 +14,7 @@
 ## Run
 ```bash
 pip install -r requirements.txt
-python -m src.main
+python -m main
 ```
 
 ## Quick test

@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Tuple
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-
+ 
 from .sbs_config import load_config, SbsConfig, SbsConfigError
 from .log_parser import parse_log_lines
 from .utils import format_time_us_to_hhmmssus, ParsedRecord
@@ -15,7 +15,7 @@ from .config_editor import ConfigEditor
 from .plotter import build_series, render_plot
 from .updater import check_update
 
-APP_VERSION = '0.8.0-draft'
+APP_VERSION = '0.8.1-draft'
 UPDATE_JSON_URL = 'https://raw.githubusercontent.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/refs/heads/main/update.json'
 
 
