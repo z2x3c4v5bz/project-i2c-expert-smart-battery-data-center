@@ -16,7 +16,7 @@ from .plotter import build_series, render_plot
 from .updater import check_update
 
 APP_VERSION = '0.8.0-draft'
-UPDATE_JSON_URL = 'https://raw.githubusercontent.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/main/update.json'
+UPDATE_JSON_URL = 'https://raw.githubusercontent.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/refs/heads/main/update.json'
 
 
 class ProgressDialog(tk.Toplevel):
