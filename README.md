@@ -1,4 +1,16 @@
-# I2C Expert Smart Battery Data Center (v0.9 draft)
+# Project -- I2C Expert Smart Battery Data Center #
+
+[![issue](https://img.shields.io/github/discussions/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center)](https://github.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/discussions)
+[![forks](https://img.shields.io/github/forks/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center)](https://github.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/network)
+[![stars](https://img.shields.io/github/stars/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center)](https://github.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/stargazers)
+[![release](https://img.shields.io/github/release/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/all)](https://github.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/releases)
+[![license](https://img.shields.io/github/license/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center)](https://github.com/z2x3c4v5bz/project-i2c-expert-smart-battery-data-center/blob/master/LICENSE)
+
+## Abstract ##
+
+**Title:** Python Project -- I2C Expert Smart Battery Data Center
+
+**Auther:** Zachary Lin
 
 ## Changes
 - Value(binary) order fixed: for non-isValue entries, bytes are displayed high->low in the **Value** field.
