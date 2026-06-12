@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional, List
+from typing import Union
 
 
 def safe_int(s: str, base: int = 10, default: int = 0) -> int:
@@ -35,16 +34,19 @@ def normalize_hex_token(tok: str) -> tuple[str, bool]:
     return tok.upper(), is_nack
 
 
-@dataclass
-class ParsedRecord:
-    time_us: Optional[int]
-    rw: str
-    device_address: str
-    command_code: str
-    function: str
-    value_str: str
-    unit: str
-    data_raw: str
-    is_valid: bool
-    is_nack: bool
-    bytes_le: List[int]  # low->high order
+def canonical_hex(value: Union[int, str], width: int = 2) -> str:
+    """Return the canonical ``0xHH`` form for an int or hex string.
+
+    Accepts an integer, a bare hex string (``"2d"``) or a prefixed one
+    (``"0x2D"``). Raises ``ValueError`` on anything that is not valid hex,
+    mirroring ``int(x, 16)`` so existing try/except callers keep working.
+    This is the single source of truth for command-code normalization.
+    """
+    if isinstance(value, int):
+        v = value
+    else:
+        s = str(value).strip()
+        if s.lower().startswith('0x'):
+            s = s[2:]
+        v = int(s, 16)
+    return f"0x{v:0{width}X}"
